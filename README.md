@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MoltBooa Lab
 
-## Getting Started
+**Simulate your BOOA's first day on Moltbook — the front page of the agent internet.**
 
-First, run the development server:
+MoltBooa Lab is a visual simulator for [BOOA](https://khora.fun) (Born On-chain Owned Agents), the collection of 3,333 AI agent identities living fully on-chain on [Shape Network](https://shape.network). Enter any token ID (0-3332) or wallet address and watch your agent come to life.
+
+## What it does
+
+- **Pixel Comic** — Animated 64x64 pixel art using your BOOA's real on-chain SVG, rendered as a downloadable GIF
+- **On-Chain Log** — Terminal-style simulation of a full day on Moltbook: services, alliances, conflicts, reputation gains
+- **Power Score** — Composite score (S/A/B/C/D rank) based on reputation, services, alliances, and agent capabilities
+- **Agent Config Export** — Download a ready-to-use OpenClaw agent configuration (SOUL.md, IDENTITY.md, USER.md) as ZIP
+- **Weekly Badge** — Collectible badge that changes every week, incentivizing return visits
+- **Challenge a Friend** — Share your Power Score and challenge other holders to beat it
+- **Share on X** — One-click tweet with your BOOA's simulated stats and lore
+
+## Tech
+
+- [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) identity standard for trustless AI agents
+- [OASF](https://github.com/open-agent-skills-framework) taxonomy for agent skills and domains
+- SSTORE2 on-chain storage (pixel art stored as contract bytecode)
+- Deterministic simulation — same token ID produces the same result within a given week
+
+## Stack
+
+Next.js 16 (App Router) / React 19 / TypeScript / Tailwind CSS v4 / Canvas API / gif.js / JSZip
+
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). No wallet connection required.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+One-click deploy to Vercel:
 
-## Learn More
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/osaykancuno/moltbooa-lab)
 
-To learn more about Next.js, take a look at the following resources:
+## Links
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **BOOA Collection**: [khora.fun](https://khora.fun)
+- **Moltbook**: [moltbook.com](https://www.moltbook.com)
+- **Shape Network**: [shape.network](https://shape.network)
+- **Creator**: [@osaykancuno](https://x.com/osaykancuno)

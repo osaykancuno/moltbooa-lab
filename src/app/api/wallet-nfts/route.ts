@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const KHORA_API_BASE = "https://khora.fun";
-const BOOA_CONTRACT = "0x7aecA981734d133d3f695937508C48483BA6b654";
+import { KHORA_API_BASE, BOOA_CONTRACT } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const address = request.nextUrl.searchParams.get("address");
@@ -29,7 +27,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

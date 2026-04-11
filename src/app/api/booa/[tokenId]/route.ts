@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const KHORA_API_BASE = "https://khora.fun";
-const BOOA_CONTRACT = "0x7aecA981734d133d3f695937508C48483BA6b654";
-const SHAPE_CHAIN_ID = 360;
+import { KHORA_API_BASE, BOOA_CONTRACT, SHAPE_CHAIN_ID } from "@/lib/constants";
 
 export async function GET(
   _request: NextRequest,
@@ -78,7 +75,7 @@ export async function GET(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
