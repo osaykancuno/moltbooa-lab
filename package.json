@@ -1,6 +1,6 @@
 {
-  "name": "temp-app",
-  "version": "0.1.0",
+  "name": "moltbooa-lab",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,12 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "file-saver": "^2.0.5",
+    "gif.js": "^0.2.0",
+    "jszip": "^3.10.1",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

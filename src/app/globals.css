@@ -1,26 +1,143 @@
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0f;
+  --foreground: #e0e0e0;
+  --accent-purple: #8b5cf6;
+  --accent-cyan: #22d3ee;
+  --accent-green: #00ff41;
+  --accent-red: #ff4444;
+  --accent-yellow: #eeee77;
+  --card-bg: #16162a;
+  --card-border: #2a2a44;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-green: var(--accent-green);
+  --color-accent-red: var(--accent-red);
+  --color-accent-yellow: var(--accent-yellow);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+  --font-pixel: "Press Start 2P", monospace;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "JetBrains Mono", monospace;
 }
+
+/* CRT Scanlines overlay */
+.crt-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.03) 0px,
+    rgba(0, 0, 0, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Glitch text effect */
+@keyframes glitch {
+  0% { text-shadow: 2px 0 #8b5cf6, -2px 0 #22d3ee; }
+  25% { text-shadow: -2px 0 #8b5cf6, 2px 0 #22d3ee; }
+  50% { text-shadow: 2px -1px #8b5cf6, -2px 1px #22d3ee; }
+  75% { text-shadow: -1px 2px #8b5cf6, 1px -2px #22d3ee; }
+  100% { text-shadow: 2px 0 #8b5cf6, -2px 0 #22d3ee; }
+}
+
+.glitch-text {
+  animation: glitch 3s infinite;
+}
+
+/* Flicker for terminal cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* Typewriter effect for log entries */
+@keyframes typewriter {
+  from { max-width: 0; }
+  to { max-width: 100%; }
+}
+
+.typewriter-line {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 0.8s steps(40) forwards;
+}
+
+/* Pixel art canvas - nearest neighbor scaling */
+.pixel-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Glow effects */
+.glow-purple { box-shadow: 0 0 15px rgba(139, 92, 246, 0.4), 0 0 30px rgba(139, 92, 246, 0.1); }
+.glow-cyan { box-shadow: 0 0 15px rgba(34, 211, 238, 0.4), 0 0 30px rgba(34, 211, 238, 0.1); }
+.glow-green { box-shadow: 0 0 15px rgba(0, 255, 65, 0.4), 0 0 30px rgba(0, 255, 65, 0.1); }
+
+/* Gradient border card */
+.gradient-border {
+  position: relative;
+  isolation: isolate;
+  background: var(--card-bg);
+  border-radius: 8px;
+}
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan), var(--accent-green));
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* Fade-in animation */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.animate-fade-in-delay {
+  opacity: 0;
+  animation: fadeInUp 0.6s ease-out forwards;
+  animation-delay: 0.3s;
+}
+
+/* Reputation bar animation */
+@keyframes fillBar {
+  from { width: 0; }
+}
+
+.animate-fill {
+  animation: fillBar 1.5s ease-out forwards;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #111118; }
+::-webkit-scrollbar-thumb { background: #333355; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #8b5cf6; }
