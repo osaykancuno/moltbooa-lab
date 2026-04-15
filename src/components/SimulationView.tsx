@@ -7,7 +7,8 @@ import ReputationBar from "./ReputationBar";
 import AllianceCard from "./AllianceCard";
 import ServiceCard from "./ServiceCard";
 import FutureSelfCard from "./FutureSelfCard";
-import OpenClawExport from "./OpenClawExport";
+import AgentExport from "./AgentExport";
+import BOOAChat from "./BOOAChat";
 import ShareButton from "./ShareButton";
 import PowerScore, { computePowerScore } from "./PowerScore";
 import CompareButton from "./CompareButton";
@@ -95,8 +96,11 @@ export default function SimulationView({
       {/* Weekly Badge */}
       <WeeklyBadge sim={sim} />
 
-      {/* OpenClaw Export */}
-      <OpenClawExport data={data} sim={sim} />
+      {/* Talk to your BOOA */}
+      <BOOAChat data={data} sim={sim} />
+
+      {/* Agent Config Export (OpenClaw / ElizaOS / MCP) */}
+      <AgentExport data={data} sim={sim} />
 
       {/* Share */}
       <ShareButton sim={sim} tokenId={tokenId} />

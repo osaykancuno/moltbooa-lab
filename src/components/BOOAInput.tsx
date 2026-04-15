@@ -6,34 +6,20 @@ import { getRandomTokenId } from "@/lib/khora-api";
 
 export default function BOOAInput() {
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
 
   const isWallet = input.startsWith("0x") && input.length === 42;
   const isTokenId = /^\d+$/.test(input) && Number(input) < 3333;
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
 
     if (isTokenId) {
       router.push(`/simulate/${input}`);
     } else if (isWallet) {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/wallet-nfts?address=${input}`);
-        const data = await res.json();
-        if (data.nfts?.length > 0) {
-          router.push(`/simulate/${data.nfts[0].tokenId}`);
-        } else {
-          setError("No BOOA found in this wallet.");
-        }
-      } catch {
-        setError("Failed to fetch wallet data. Try a Token ID instead.");
-      } finally {
-        setLoading(false);
-      }
+      router.push(`/wallet/${input}`);
     } else if (input.trim()) {
       setError("Enter a valid Token ID (0-3332) or wallet address (0x...)");
     }
@@ -57,7 +43,6 @@ export default function BOOAInput() {
             }}
             placeholder="Token ID (e.g. 1496) or Wallet (0x...)"
             className="w-full px-4 py-3 bg-card-bg border border-card-border rounded-lg text-sm font-[family-name:var(--font-mono)] text-foreground placeholder:text-foreground/30 focus:outline-none focus:border-accent-purple focus:ring-1 focus:ring-accent-purple/50 transition-all"
-            disabled={loading}
           />
           {input && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-foreground/40">
@@ -69,10 +54,10 @@ export default function BOOAInput() {
         <div className="flex gap-3">
           <button
             type="submit"
-            disabled={loading || (!isTokenId && !isWallet)}
+            disabled={!isTokenId && !isWallet}
             className="flex-1 px-4 py-3 bg-accent-purple text-white text-sm font-[family-name:var(--font-pixel)] text-[10px] rounded-lg hover:bg-accent-purple/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all glow-purple"
           >
-            {loading ? "SCANNING..." : "SIMULATE"}
+            {isWallet ? "OPEN WALLET" : "SIMULATE"}
           </button>
           <button
             type="button"

@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import BOOAInput from "@/components/BOOAInput";
+import ModeSelector from "@/components/ModeSelector";
 
 export default function Home() {
   return (
@@ -18,25 +19,35 @@ export default function Home() {
               Simulate a day on Moltbook. Generate your agent&apos;s future.
             </span>
           </p>
-          <div className="flex justify-center gap-6 text-[10px] text-foreground/30">
+          <div className="flex justify-center gap-6 text-[10px] text-foreground/30 flex-wrap">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-accent-green" />
               Pixel Comic
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-accent-purple" />
-              On-Chain Log
+              Talk to your BOOA
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-accent-cyan" />
-              Agent Config
+              Agent Config Export
             </span>
           </div>
         </div>
 
-        {/* Input */}
+        {/* Primary input */}
         <div className="w-full animate-fade-in-delay">
           <BOOAInput />
+        </div>
+
+        {/* Mode selector — Battle / Saga */}
+        <div className="w-full mt-10 animate-fade-in-delay">
+          <div className="text-center mb-4">
+            <span className="text-[9px] text-foreground/30 font-[family-name:var(--font-pixel)] tracking-widest">
+              ── ALTERNATE MODES ──
+            </span>
+          </div>
+          <ModeSelector />
         </div>
 
         {/* Features */}
@@ -46,17 +57,17 @@ export default function Home() {
               SIMULATE
             </div>
             <p className="text-[11px] text-foreground/50">
-              Your BOOA lives a full day on Moltbook — offering OASF services,
-              forming alliances, gaining reputation via ERC-8004.
+              Your BOOA lives a full day on Moltbook — services, alliances,
+              reputation. All deterministic via tokenId + week.
             </p>
           </div>
           <div className="gradient-border p-4 rounded-lg text-center">
             <div className="font-[family-name:var(--font-pixel)] text-[10px] text-accent-cyan mb-2">
-              VISUALIZE
+              CHAT
             </div>
             <p className="text-[11px] text-foreground/50">
-              64x64 pixel art comic with C64 palette. Download as animated GIF.
-              Share your agent&apos;s story.
+              Talk to your BOOA via OpenRouter, Groq, or Hugging Face. Free LLMs
+              available. Your API key never leaves the browser.
             </p>
           </div>
           <div className="gradient-border p-4 rounded-lg text-center">
@@ -64,8 +75,8 @@ export default function Home() {
               EXPORT
             </div>
             <p className="text-[11px] text-foreground/50">
-              Ready-to-use OpenClaw agent config — SOUL.md, IDENTITY.md,
-              USER.md. Deploy on Moltbook.
+              Ready-to-deploy configs for OpenClaw, ElizaOS, and MCP Server
+              (Claude Desktop, Cursor, Cline).
             </p>
           </div>
         </div>

@@ -2,14 +2,10 @@
 
 import { useEffect, useState } from "react";
 import type { SimulationResult } from "@/types";
+import { computePowerScore as compute, getRank } from "@/lib/power-score";
 
-function getRank(score: number): { label: string; color: string } {
-  if (score >= 90) return { label: "S", color: "text-accent-cyan" };
-  if (score >= 75) return { label: "A", color: "text-accent-green" };
-  if (score >= 50) return { label: "B", color: "text-accent-purple" };
-  if (score >= 25) return { label: "C", color: "text-accent-yellow" };
-  return { label: "D", color: "text-accent-red" };
-}
+// Re-export for components that import from here (backwards compatibility)
+export const computePowerScore = compute;
 
 function getGlowClass(score: number): string {
   if (score >= 90) return "glow-cyan";
@@ -23,19 +19,6 @@ function getBorderGradient(score: number): string {
   if (score >= 50) return "from-accent-purple to-accent-cyan";
   if (score >= 25) return "from-accent-yellow to-accent-purple";
   return "from-accent-red to-accent-yellow";
-}
-
-export function computePowerScore(sim: SimulationResult): number {
-  return Math.min(
-    100,
-    Math.floor(
-      sim.totalReputation * 0.4 +
-        sim.services.filter((s) => s.completed).length * 15 +
-        sim.alliances.length * 10 +
-        (sim.scores?.overall ?? 30) * 0.3 +
-        (sim.rankBefore > sim.rankAfter ? 10 : 0)
-    )
-  );
 }
 
 export default function PowerScore({ sim }: { sim: SimulationResult }) {

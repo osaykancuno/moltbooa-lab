@@ -76,12 +76,17 @@ function generateService(
   };
 }
 
+export function getCurrentWeek(): number {
+  return getWeekNumber();
+}
+
 export function simulate(
   traits: BOOATraits,
   scores: AgentScores | null,
-  tokenId: string
+  tokenId: string,
+  weekOverride?: number
 ): SimulationResult {
-  const weekSeed = getWeekNumber();
+  const weekSeed = weekOverride ?? getWeekNumber();
   const seed = hashString(tokenId) + weekSeed * 7919;
   const rng = mulberry32(seed);
 
