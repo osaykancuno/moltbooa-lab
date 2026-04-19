@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AgentAction, ActionResult, ActionStatus } from "@/lib/actions/types";
 import { guardAction, isBlocked, type GuardWarning } from "@/lib/actions/guard";
 import { simulateAction, type SimulationResult } from "@/lib/actions/simulate";
+import { chainLabel } from "@/lib/chains";
 import DecodedCalldata from "./DecodedCalldata";
 
 interface Props {
@@ -100,8 +101,15 @@ export default function ActionCard({
       {/* header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 space-y-0.5">
-          <div className="font-[family-name:var(--font-pixel)] text-[9px] text-foreground/40 tracking-wider">
-            {KIND_LABEL[action.kind]}
+          <div className="flex items-center gap-2">
+            <div className="font-[family-name:var(--font-pixel)] text-[9px] text-foreground/40 tracking-wider">
+              {KIND_LABEL[action.kind]}
+            </div>
+            {(action.kind === "contract" || action.kind === "tx") && (
+              <span className="font-[family-name:var(--font-pixel)] text-[9px] px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30">
+                {chainLabel(action.chainId)}
+              </span>
+            )}
           </div>
           <div className="font-[family-name:var(--font-mono)] text-[12px] text-foreground/90 leading-tight">
             {action.title}

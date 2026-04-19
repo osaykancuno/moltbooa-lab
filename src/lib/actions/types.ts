@@ -19,8 +19,15 @@
  */
 
 import type { Abi, TypedDataDomain } from "viem";
+import type { SupportedChainId } from "@/lib/chains";
+import { IDENTITY_CHAIN_ID } from "@/lib/chains";
 
-export const TARGET_CHAIN_ID = 360; // Shape
+/**
+ * The chain ERC-8004 identity writes go to. Kept as a named export because
+ * the identity-registry propose_* tools (setMetadata, setAgentURI) must
+ * target exactly this chain regardless of what the user is trading on.
+ */
+export const TARGET_CHAIN_ID: SupportedChainId = IDENTITY_CHAIN_ID; // Shape 360
 
 export interface ActionMeta {
   /** Opaque, stable id. Echoed back in feedback messages. */
@@ -37,7 +44,8 @@ export type ActionTx = ActionMeta & {
   data: `0x${string}`;
   /** Wei as decimal string. Omitted or "0" for pure calldata. */
   value?: string;
-  chainId: typeof TARGET_CHAIN_ID;
+  /** Any chain from `SUPPORTED_CHAINS`. */
+  chainId: SupportedChainId;
 };
 
 export type ActionContract = ActionMeta & {
@@ -47,7 +55,7 @@ export type ActionContract = ActionMeta & {
   functionName: string;
   args: unknown[];
   value?: string;
-  chainId: typeof TARGET_CHAIN_ID;
+  chainId: SupportedChainId;
 };
 
 export type ActionSignMessage = ActionMeta & {

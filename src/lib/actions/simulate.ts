@@ -8,10 +8,10 @@
  */
 
 import { getPublicClient } from "wagmi/actions";
-import { type Abi } from "viem";
+import { type Abi, type PublicClient } from "viem";
 import { wagmiConfig } from "@/lib/wagmi-config";
 import type { AgentAction } from "./types";
-import { TARGET_CHAIN_ID } from "./types";
+import { chainLabel } from "@/lib/chains";
 
 export interface SimulationResult {
   ok: boolean;
@@ -29,9 +29,17 @@ export async function simulateAction(
     return { ok: true };
   }
 
-  const client = getPublicClient(wagmiConfig, { chainId: TARGET_CHAIN_ID });
+  // Cast to a generic PublicClient — the exhaustive union across all
+  // supported chains is too complex for TS to narrow, and we don't need
+  // per-chain type info at the call site.
+  const client = getPublicClient(wagmiConfig, {
+    chainId: action.chainId,
+  }) as PublicClient | undefined;
   if (!client) {
-    return { ok: false, reason: "No public client for Shape (360)." };
+    return {
+      ok: false,
+      reason: `No public client configured for ${chainLabel(action.chainId)} (${action.chainId}).`,
+    };
   }
 
   try {

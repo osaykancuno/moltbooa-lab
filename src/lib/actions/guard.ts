@@ -8,7 +8,11 @@
 
 import { parseEther } from "viem";
 import type { AgentAction } from "./types";
-import { TARGET_CHAIN_ID } from "./types";
+import {
+  chainLabel,
+  isExpensiveChain,
+  isSupportedChainId,
+} from "@/lib/chains";
 
 export interface GuardWarning {
   level: "warn" | "block";
@@ -18,7 +22,8 @@ export interface GuardWarning {
     | "self_target"
     | "high_value"
     | "missing_fields"
-    | "bad_calldata";
+    | "bad_calldata"
+    | "expensive_chain";
   message: string;
 }
 
@@ -43,11 +48,17 @@ export function guardAction(
   }
 
   if (action.kind === "contract" || action.kind === "tx") {
-    if (action.chainId !== TARGET_CHAIN_ID) {
+    if (!isSupportedChainId(action.chainId)) {
       out.push({
         level: "block",
         code: "wrong_chain",
-        message: `chainId=${action.chainId}. This terminal only signs on Shape (360).`,
+        message: `chainId=${action.chainId} is not in the supported set.`,
+      });
+    } else if (isExpensiveChain(action.chainId)) {
+      out.push({
+        level: "warn",
+        code: "expensive_chain",
+        message: `${chainLabel(action.chainId)} — L1 gas fees apply. Double-check before approving.`,
       });
     }
   }

@@ -9,26 +9,32 @@
  *   sign_msg   → signMessage
  *   typed_data → signTypedData (EIP-712)
  *
- * We also `waitForTransactionReceipt` on tx-kind actions so we can give the
- * user a definitive success/fail and feed the block number back to the LLM.
+ * Multi-chain: for tx / contract actions we first `switchChain` to the
+ * action's target chain. Most injected wallets honor EIP-3326 and do this
+ * silently; some ask for confirmation. If the wallet rejects the switch we
+ * surface it as a regular "rejected" error — the user sees "REJECTED" on
+ * the card and the LLM gets told.
+ *
+ * For `sign_msg` / `typed_data` we don't switch — off-chain signatures are
+ * chain-agnostic (typed_data encodes `chainId` in its domain).
  */
 
 import { useCallback, useState } from "react";
-import { useAccount, usePublicClient } from "wagmi";
+import { useAccount } from "wagmi";
 import {
+  getPublicClient,
   sendTransaction,
   signMessage,
   signTypedData,
-  writeContract,
+  switchChain,
   waitForTransactionReceipt,
+  writeContract,
 } from "wagmi/actions";
 import { wagmiConfig } from "@/lib/wagmi-config";
 import type { AgentAction, ActionResult } from "./types";
-import { TARGET_CHAIN_ID } from "./types";
 
 export function useExecuteAction() {
-  const { address } = useAccount();
-  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID });
+  const { address, chainId: walletChainId } = useAccount();
   const [running, setRunning] = useState<string | null>(null);
 
   const execute = useCallback(
@@ -68,6 +74,11 @@ export function useExecuteAction() {
           };
         }
 
+        // On-chain action: ensure the wallet is on the right chain first.
+        if (walletChainId !== action.chainId) {
+          await switchChain(wagmiConfig, { chainId: action.chainId });
+        }
+
         let hash: `0x${string}`;
         if (action.kind === "contract") {
           hash = await writeContract(wagmiConfig, {
@@ -76,7 +87,7 @@ export function useExecuteAction() {
             functionName: action.functionName,
             args: action.args,
             value: action.value ? BigInt(action.value) : undefined,
-            chainId: TARGET_CHAIN_ID,
+            chainId: action.chainId,
             account: address,
           });
         } else {
@@ -85,15 +96,22 @@ export function useExecuteAction() {
             to: action.to,
             data: action.data,
             value: action.value ? BigInt(action.value) : undefined,
-            chainId: TARGET_CHAIN_ID,
+            chainId: action.chainId,
             account: address,
           });
         }
 
-        // Wait for the receipt so we know if the tx actually succeeded.
-        const receipt = publicClient
-          ? await publicClient.waitForTransactionReceipt({ hash })
-          : await waitForTransactionReceipt(wagmiConfig, { hash });
+        // Wait for the receipt on the action's chain so block numbers
+        // match what the explorer shows.
+        const client = getPublicClient(wagmiConfig, {
+          chainId: action.chainId,
+        });
+        const receipt = client
+          ? await client.waitForTransactionReceipt({ hash })
+          : await waitForTransactionReceipt(wagmiConfig, {
+              hash,
+              chainId: action.chainId,
+            });
 
         return {
           id: action.id,
@@ -122,7 +140,7 @@ export function useExecuteAction() {
         setRunning(null);
       }
     },
-    [address, publicClient]
+    [address, walletChainId]
   );
 
   return { execute, running };

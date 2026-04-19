@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { SHAPE_EXPLORER } from "@/lib/constants";
+import { txExplorerUrl } from "@/lib/chains";
 import type { ActionResult } from "@/lib/actions/types";
 
 interface Props {
   result: ActionResult | null;
+  /** Chain the action targeted — used to build the explorer link. */
+  chainId?: number;
   onDismiss: () => void;
 }
 
@@ -13,7 +15,7 @@ interface Props {
  * Tiny floating toast for the most recent action result. Auto-dismisses after
  * 6s on success, stays until clicked on failure.
  */
-export default function TxToast({ result, onDismiss }: Props) {
+export default function TxToast({ result, chainId, onDismiss }: Props) {
   useEffect(() => {
     if (!result) return;
     if (result.status === "success") {
@@ -55,16 +57,23 @@ export default function TxToast({ result, onDismiss }: Props) {
           ✕
         </button>
       </div>
-      {result.hash && (
-        <a
-          href={`${SHAPE_EXPLORER}/tx/${result.hash}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block text-[10px] font-[family-name:var(--font-mono)] break-all hover:underline"
-        >
-          {result.hash}
-        </a>
-      )}
+      {result.hash && (() => {
+        const url = chainId ? txExplorerUrl(chainId, result.hash) : null;
+        return url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[10px] font-[family-name:var(--font-mono)] break-all hover:underline"
+          >
+            {result.hash}
+          </a>
+        ) : (
+          <div className="block text-[10px] font-[family-name:var(--font-mono)] break-all">
+            {result.hash}
+          </div>
+        );
+      })()}
       {result.signature && (
         <div className="text-[10px] font-[family-name:var(--font-mono)] break-all">
           sig: {result.signature.slice(0, 24)}…

@@ -65,7 +65,9 @@ export default function AgentTerminalChat({
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reads, setReads] = useState<AgentRead[]>([]);
-  const [toast, setToast] = useState<ActionResult | null>(null);
+  const [toast, setToast] = useState<
+    { result: ActionResult; chainId?: number } | null
+  >(null);
 
   // Feedback staged by approvals/rejections, drained into the next user turn.
   const pendingFeedbackRef = useRef<ActionResult[]>([]);
@@ -169,7 +171,11 @@ export default function AgentTerminalChat({
         action,
         result,
       });
-      setToast(result);
+      const chainId =
+        action.kind === "contract" || action.kind === "tx"
+          ? action.chainId
+          : undefined;
+      setToast({ result, chainId });
     },
     [execute, tokenId]
   );
@@ -342,7 +348,11 @@ export default function AgentTerminalChat({
         />
       </div>
 
-      <TxToast result={toast} onDismiss={() => setToast(null)} />
+      <TxToast
+        result={toast?.result ?? null}
+        chainId={toast?.chainId}
+        onDismiss={() => setToast(null)}
+      />
     </>
   );
 }

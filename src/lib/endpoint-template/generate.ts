@@ -446,6 +446,32 @@ import {
 const SHAPE = 360;
 const ERC_8004_REGISTRY = ${JSON.stringify(ERC_8004_REGISTRY)};
 
+/**
+ * Allowlist of chains the browser Terminal can sign on. Keep this in sync
+ * with src/lib/chains.ts. If the LLM proposes anything else the Terminal's
+ * guard blocks it anyway — we mirror it here so we reject early instead of
+ * drafting a proposal that's guaranteed to fail.
+ */
+const SUPPORTED_CHAIN_IDS = new Set<number>([
+  360, // Shape
+  1, // Ethereum
+  42161, // Arbitrum
+  10, // Optimism
+  8453, // Base
+  137, // Polygon
+  56, // BSC
+  59144, // Linea
+  324, // zkSync Era
+]);
+
+function resolveChainId(raw: unknown, fallback: number = SHAPE): number | null {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  if (!SUPPORTED_CHAIN_IDS.has(n)) return null;
+  return n;
+}
+
 // ── SSRF guard for fetch_url ──
 const PRIVATE_IP_RES = [
   /^10\\./,
@@ -616,7 +642,7 @@ export const TOOL_SCHEMAS = [
     function: {
       name: "propose_contract_call",
       description:
-        "Propose an on-chain contract call for the USER to sign in their wallet. DO NOT use for reads (use get_*). DO NOT sign anything here — just describe the intent. The user sees a card with the decoded call and approves it. Only chain supported: Shape (360).",
+        "Propose an on-chain contract call for the USER to sign in their wallet. DO NOT use for reads (use get_*). DO NOT sign anything here — just describe the intent. The user sees a card with the decoded call, chain label, and approves it. Supported chains: Shape (360), Ethereum (1), Arbitrum (42161), Optimism (10), Base (8453), Polygon (137), BSC (56), Linea (59144), zkSync Era (324). Defaults to Shape if 'chainId' is omitted.",
       parameters: {
         type: "object",
         properties: {
@@ -648,6 +674,10 @@ export const TOOL_SCHEMAS = [
           valueEth: {
             type: "string",
             description: "Optional ETH value to send with the call, as a decimal string (e.g. '0.01'). Omit or '0' if not payable.",
+          },
+          chainId: {
+            type: "number",
+            description: "Target chain id. One of: 360 (Shape), 1 (Ethereum), 42161 (Arbitrum), 10 (Optimism), 8453 (Base), 137 (Polygon), 56 (BSC), 59144 (Linea), 324 (zkSync Era). Defaults to 360 (Shape) if omitted.",
           },
         },
         required: ["title", "rationale", "address", "abi", "functionName", "args"],
@@ -686,6 +716,10 @@ export const TOOL_SCHEMAS = [
           from: { type: "string", description: "Current owner (usually the connected user's wallet)." },
           to: { type: "string", description: "Recipient address." },
           tokenId: { type: "string", description: "Token id as a decimal string." },
+          chainId: {
+            type: "number",
+            description: "Target chain id. One of: 360 (Shape), 1 (Ethereum), 42161 (Arbitrum), 10 (Optimism), 8453 (Base), 137 (Polygon), 56 (BSC), 59144 (Linea), 324 (zkSync Era). Defaults to 360 (Shape).",
+          },
         },
         required: ["title", "rationale", "contract", "from", "to", "tokenId"],
       },
@@ -740,6 +774,10 @@ export const TOOL_SCHEMAS = [
           to: { type: "string", description: "Destination 0x address." },
           dataHex: { type: "string", description: "Calldata as 0x-prefixed hex." },
           valueEth: { type: "string", description: "Optional ETH value." },
+          chainId: {
+            type: "number",
+            description: "Target chain id. One of: 360 (Shape), 1 (Ethereum), 42161 (Arbitrum), 10 (Optimism), 8453 (Base), 137 (Polygon), 56 (BSC), 59144 (Linea), 324 (zkSync Era). Defaults to 360 (Shape).",
+          },
         },
         required: ["title", "rationale", "to", "dataHex"],
       },
@@ -835,6 +873,8 @@ export async function runTool(
       if (!Array.isArray(args.abi) || typeof args.functionName !== "string") {
         return { error: "abi and functionName required" };
       }
+      const cid = resolveChainId(args.chainId);
+      if (cid === null) return { error: "unsupported chainId" };
       const proposal: ActionProposal = {
         __action: {
           kind: "contract",
@@ -846,7 +886,7 @@ export async function runTool(
           functionName: args.functionName,
           args: Array.isArray(args.args) ? args.args : [],
           value: ethToWei(args.valueEth),
-          chainId: SHAPE,
+          chainId: cid,
         },
       };
       return proposal;
@@ -879,6 +919,8 @@ export async function runTool(
         return { error: "bad from address" };
       if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { error: "bad to address" };
       if (!/^\\d+$/.test(tokenId)) return { error: "bad tokenId" };
+      const cid = resolveChainId(args.chainId);
+      if (cid === null) return { error: "unsupported chainId" };
       const proposal: ActionProposal = {
         __action: {
           kind: "contract",
@@ -889,7 +931,7 @@ export async function runTool(
           abi: ERC721_SAFE_TRANSFER_FROM_ABI,
           functionName: "safeTransferFrom",
           args: [from, to, tokenId],
-          chainId: SHAPE,
+          chainId: cid,
         },
       };
       return proposal;
@@ -952,6 +994,8 @@ export async function runTool(
       if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { error: "bad to address" };
       if (!/^0x([0-9a-fA-F]{2})*$/.test(dataHex))
         return { error: "dataHex must be 0x-prefixed hex" };
+      const cid = resolveChainId(args.chainId);
+      if (cid === null) return { error: "unsupported chainId" };
       const proposal: ActionProposal = {
         __action: {
           kind: "tx",
@@ -961,7 +1005,7 @@ export async function runTool(
           to,
           data: dataHex,
           value: ethToWei(args.valueEth),
-          chainId: SHAPE,
+          chainId: cid,
         },
       };
       return proposal;
@@ -1237,7 +1281,9 @@ Proposals (you draft, the HOLDER signs in their wallet — you never execute):
 
 Rules when proposing:
   · ONE action per tool call. Describe WHY in \`rationale\` — the holder reads it.
-  · Only Shape (chainId 360). Never propose on any other chain.
+  · Multi-chain: trading, swaps, transfers and arbitrary contract calls can target any supported EVM chain — pass \`chainId\` in the proposal. Supported: 360 (Shape), 1 (Ethereum), 42161 (Arbitrum), 10 (Optimism), 8453 (Base), 137 (Polygon), 56 (BSC), 59144 (Linea), 324 (zkSync Era). Default is Shape (360) when omitted.
+  · ERC-8004 identity writes (propose_set_agent_metadata, propose_set_agent_uri) ALWAYS go to Shape 360 — the registry only lives there.
+  · The holder's wallet will be asked to switch networks before signing. Warn the user in \`rationale\` when proposing on a chain other than Shape, especially Ethereum mainnet (expensive gas).
   · After a proposal is queued, wrap up. Do NOT repeat the same proposal.
   · If you don't know an address, do NOT invent one — ask the holder.
 
