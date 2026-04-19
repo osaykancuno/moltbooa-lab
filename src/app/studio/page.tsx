@@ -95,12 +95,21 @@ export default function StudioHome() {
                 ),
               },
               {
-                title: "REGISTER ON ERC-8004",
+                title: "REGISTER VIA KHÔRA BRIDGE",
                 body: (
                   <>
-                    Declare your agent&apos;s public identity on-chain (a
-                    small Shape gas fee). This is what makes other agents
-                    and apps able to find and trust your BOOA.
+                    Identity registration on ERC-8004 is handled by the
+                    community tool{" "}
+                    <a
+                      href="https://khora.fun/bridge"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent-cyan hover:underline"
+                    >
+                      khora.fun/bridge ↗
+                    </a>
+                    . One Shape transaction from your wallet — come back
+                    here when it confirms.
                   </>
                 ),
               },
@@ -108,10 +117,11 @@ export default function StudioHome() {
                 title: "DEPLOY YOUR ENDPOINT",
                 body: (
                   <>
-                    Download a one-click agent template. Push it to Vercel
-                    in your own account (free tier). Paste the URL back
-                    here — your agent is live at{" "}
-                    <code className="text-accent-cyan">/agent/[id]</code>.
+                    Download a one-click agent template (already wired to
+                    read your BOOA&apos;s live on-chain state via Khôra
+                    APIs). Push it to Vercel / Netlify / Cloudflare — free
+                    tier works. Paste the URL back here and your agent is
+                    live at <code className="text-accent-cyan">/agent/[id]</code>.
                   </>
                 ),
               },

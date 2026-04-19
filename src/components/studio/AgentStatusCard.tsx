@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { AgentOnChainState } from "@/types/studio";
+import { KHORA_BRIDGE_URL } from "@/lib/constants";
 
 interface Props {
   state: AgentOnChainState;
@@ -62,10 +63,11 @@ export default function AgentStatusCard({ state }: Props) {
   const endpointSet = state.endpointStatus === "set";
   const live = registered && endpointSet;
 
-  // Decide which step is "current" so the button styling tells the user
-  // where to click next without reading anything.
-  const nextStep: "register" | "endpoint" | "done" = !registered
-    ? "register"
+  // Registration is delegated to khora.fun/bridge — the community tool.
+  // Our owned action is the endpoint. Highlight ENDPOINT as "current" when
+  // identity is already registered but endpoint isn't set yet.
+  const nextStep: "identity" | "endpoint" | "done" = !registered
+    ? "identity"
     : !endpointSet
       ? "endpoint"
       : "done";
@@ -84,7 +86,7 @@ export default function AgentStatusCard({ state }: Props) {
             help={
               registered
                 ? "Your BOOA is visible on-chain to other agents."
-                : "Declare a public identity. Requires one Shape tx."
+                : "Register via Khôra Bridge (community tool)."
             }
           />
           <Badge
@@ -104,7 +106,7 @@ export default function AgentStatusCard({ state }: Props) {
             help={
               state.servicesCount > 0
                 ? "Skills + domains advertised on-chain."
-                : "Optional — declare OASF skills to be discoverable."
+                : "Auto-filled at registration time."
             }
           />
         </div>
@@ -131,9 +133,24 @@ export default function AgentStatusCard({ state }: Props) {
             NEXT STEP
           </div>
           <p className="text-[11px] text-foreground/70">
-            {nextStep === "register"
-              ? "Register your BOOA on ERC-8004. This takes one Shape transaction. Your wallet will prompt you to confirm."
-              : "Deploy (or link) an endpoint. You don't need to write code — we ship a ready-to-deploy template."}
+            {nextStep === "identity" ? (
+              <>
+                Register your BOOA on ERC-8004 via{" "}
+                <a
+                  href={KHORA_BRIDGE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent-cyan hover:underline"
+                >
+                  Khôra Bridge ↗
+                </a>
+                . It&apos;s the community tool that runs the canonical
+                registry — one Shape transaction from your wallet. Come
+                back here after.
+              </>
+            ) : (
+              "Deploy (or link) an endpoint. You don't need to write code — we ship a ready-to-deploy template."
+            )}
           </p>
         </section>
       )}
@@ -143,19 +160,19 @@ export default function AgentStatusCard({ state }: Props) {
           ── ACTIONS ──
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FixButton
-            href={`/studio/${state.tokenId}/register`}
-            label={registered ? "UPDATE IDENTITY" : "REGISTER (ERC-8004)"}
-            tone={nextStep === "register" ? "primary" : "neutral"}
+          <ExternalActionButton
+            href={KHORA_BRIDGE_URL}
+            label={registered ? "UPDATE ON KHÔRA ↗" : "REGISTER ON KHÔRA ↗"}
+            tone={nextStep === "identity" ? "primary" : "neutral"}
           />
-          <FixButton
+          <ActionButton
             href={`/studio/${state.tokenId}/endpoint`}
             label={endpointSet ? "UPDATE ENDPOINT" : "SET ENDPOINT"}
             tone={nextStep === "endpoint" ? "primary" : "neutral"}
           />
-          <FixButton
+          <ActionButton
             href={`/studio/${state.tokenId}/services`}
-            label="MANAGE SERVICES"
+            label="VIEW SERVICES"
             tone="neutral"
           />
         </div>
@@ -164,7 +181,13 @@ export default function AgentStatusCard({ state }: Props) {
   );
 }
 
-function FixButton({
+function btnClass(tone: "primary" | "neutral"): string {
+  return tone === "primary"
+    ? "bg-accent-purple/20 border-accent-purple/50 text-accent-purple hover:bg-accent-purple/30 ring-2 ring-accent-purple/30"
+    : "bg-card-bg border-card-border text-foreground/60 hover:text-foreground/90";
+}
+
+function ActionButton({
   href,
   label,
   tone,
@@ -173,16 +196,33 @@ function FixButton({
   label: string;
   tone: "primary" | "neutral";
 }) {
-  const cls =
-    tone === "primary"
-      ? "bg-accent-purple/20 border-accent-purple/50 text-accent-purple hover:bg-accent-purple/30 ring-2 ring-accent-purple/30"
-      : "bg-card-bg border-card-border text-foreground/60 hover:text-foreground/90";
   return (
     <Link
       href={href}
-      className={`text-center text-[10px] px-3 py-3 rounded border font-[family-name:var(--font-pixel)] transition-all ${cls}`}
+      className={`text-center text-[10px] px-3 py-3 rounded border font-[family-name:var(--font-pixel)] transition-all ${btnClass(tone)}`}
     >
       {label}
     </Link>
+  );
+}
+
+function ExternalActionButton({
+  href,
+  label,
+  tone,
+}: {
+  href: string;
+  label: string;
+  tone: "primary" | "neutral";
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`text-center text-[10px] px-3 py-3 rounded border font-[family-name:var(--font-pixel)] transition-all ${btnClass(tone)}`}
+    >
+      {label}
+    </a>
   );
 }

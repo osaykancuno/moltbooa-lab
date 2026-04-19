@@ -7,10 +7,12 @@ import WalletConnect from "@/components/studio/WalletConnect";
 import OwnershipGate from "@/components/studio/OwnershipGate";
 import Steps from "@/components/studio/Steps";
 import EndpointTemplateDownload from "@/components/studio/EndpointTemplateDownload";
+import EndpointTester from "@/components/studio/EndpointTester";
+import AllowedOriginHint from "@/components/studio/AllowedOriginHint";
 import { fetchAgentCard } from "@/lib/agent-card";
 import { fetchFullBOOA } from "@/lib/khora-api";
 import { validateEndpointUrl } from "@/lib/endpoint-validator";
-import { KHORA_API_BASE } from "@/lib/constants";
+import { KHORA_BRIDGE_URL } from "@/lib/constants";
 import type { AgentOnChainState } from "@/types/studio";
 import type { FullBOOAData } from "@/types";
 
@@ -176,8 +178,15 @@ export default function EndpointPage({
                         ✓ URL shape looks safe
                       </p>
                     )}
+                    {validation && validation.ok && (
+                      <EndpointTester
+                        url={urlInput}
+                        expectedTokenId={tokenId}
+                      />
+                    )}
+                    <AllowedOriginHint />
                     <a
-                      href={`${KHORA_API_BASE}/booa/${tokenId}`}
+                      href={KHORA_BRIDGE_URL}
                       target="_blank"
                       rel="noopener noreferrer"
                       aria-disabled={!(validation && validation.ok)}
@@ -197,8 +206,11 @@ export default function EndpointPage({
                     </h3>
                     <p className="text-[11px] text-foreground/60 leading-relaxed">
                       Download a complete Next.js endpoint, pre-filled with
-                      this BOOA&apos;s identity. Deploy it on Vercel / Netlify
-                      / Cloudflare (all free-tier friendly), then come back
+                      this BOOA&apos;s identity. Already wired to read its
+                      own live ERC-8004 state from the Khôra public API on
+                      every turn — optional tool calling lets it query
+                      other BOOAs too. Deploy on Vercel / Netlify /
+                      Cloudflare (all free-tier friendly), then come back
                       here and paste the URL above.
                     </p>
 
@@ -213,6 +225,18 @@ export default function EndpointPage({
                           <code className="text-accent-cyan">app/chat/route.ts</code>{" "}
                           — the <code className="text-accent-cyan">POST /chat</code>{" "}
                           handler your BOOA page calls.
+                        </li>
+                        <li>
+                          <code className="text-accent-cyan">lib/khora.ts</code>{" "}
+                          — public Khôra API client. Reads your live agent
+                          card, scores, services, and any other BOOA on-demand.
+                        </li>
+                        <li>
+                          <code className="text-accent-cyan">lib/tools.ts</code>{" "}
+                          — opt-in OpenAI tool schemas (<code>get_booa</code>,{" "}
+                          <code>get_agent_card</code>,{" "}
+                          <code>get_gallery_top</code>). Enable via{" "}
+                          <code>TOOLS_ENABLED=true</code>.
                         </li>
                         <li>
                           <code className="text-accent-cyan">soul.md</code> —

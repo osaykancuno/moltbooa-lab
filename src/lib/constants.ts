@@ -38,6 +38,9 @@ export const BOOA_DESCRIPTION =
 // External links
 export const SHAPE_EXPLORER = "https://shapescan.xyz";
 export const KHORA_COLLECTION_URL = "https://khora.fun/booa/mint";
+// Khôra's canonical ERC-8004 bridge: register / update your agent identity
+// on-chain. We delegate all identity writes to this community tool.
+export const KHORA_BRIDGE_URL = "https://khora.fun/bridge";
 export const OPENSEA_COLLECTION_URL = "https://opensea.io/collection/booa";
 export const MOLTBOOK_URL = "https://www.moltbook.com";
 

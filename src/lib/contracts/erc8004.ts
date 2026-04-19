@@ -13,8 +13,9 @@ import { ERC_8004_REGISTRY } from "@/lib/constants";
  * `bookTokenId ↔ agentId` is maintained off-chain by Khôra's API.
  *
  * ABI below is the authoritative set derived from the verified implementation.
- * Copied here so we can switch `RegisterWizard` from a Khôra handoff to a
- * direct `writeContract` as soon as we host the agentURI JSON ourselves.
+ * Kept here for future read-paths (endpoint status checks, owner lookups)
+ * and in case we ever want to bypass Khôra Bridge for writes. Today all
+ * identity writes are delegated to khora.fun/bridge — see KHORA_BRIDGE_URL.
  */
 export const erc8004Address = ERC_8004_REGISTRY as `0x${string}`;
 

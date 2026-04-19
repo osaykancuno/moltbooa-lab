@@ -16,6 +16,23 @@ export interface ChatResponseBody {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+export type EndpointErrorKind =
+  | "invalid_url"
+  | "timeout"
+  | "network" // CORS or unreachable — indistinguishable in browsers
+  | "http"
+  | "malformed";
+
+export class EndpointError extends Error {
+  kind: EndpointErrorKind;
+  status?: number;
+  constructor(kind: EndpointErrorKind, message: string, status?: number) {
+    super(message);
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
 /**
  * POST a chat payload to a holder-deployed agent endpoint.
  *
@@ -36,11 +53,18 @@ export async function postToAgentEndpoint(
 ): Promise<ChatResponseBody> {
   const validation = validateEndpointUrl(endpointUrl);
   if (!validation.ok) {
-    throw new Error(`Unsafe endpoint URL: ${validation.reason}`);
+    throw new EndpointError(
+      "invalid_url",
+      `Unsafe endpoint URL: ${validation.reason}`
+    );
   }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeoutWatch = setTimeout(() => {
+    timedOut = true;
+  }, timeoutMs);
 
   // Bridge external signal into our controller.
   const externalAbort = () => controller.abort();
@@ -48,30 +72,58 @@ export async function postToAgentEndpoint(
 
   try {
     const target = new URL("/chat", validation.url).toString();
-    const res = await fetch(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      // Holder endpoints are third-party — no cookies, no referrer.
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-      mode: "cors",
-    });
+    let res: Response;
+    try {
+      res = await fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+        // Holder endpoints are third-party — no cookies, no referrer.
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        mode: "cors",
+      });
+    } catch (err) {
+      if (timedOut || controller.signal.aborted) {
+        throw new EndpointError("timeout", "Request timed out");
+      }
+      // Browsers surface CORS, DNS, and offline failures all as TypeError.
+      throw new EndpointError(
+        "network",
+        err instanceof Error ? err.message : "Network error"
+      );
+    }
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Endpoint ${res.status}: ${text.slice(0, 200)}`);
+      throw new EndpointError(
+        "http",
+        `HTTP ${res.status}: ${text.slice(0, 200)}`,
+        res.status
+      );
     }
 
-    const json = (await res.json()) as Partial<ChatResponseBody>;
+    let json: Partial<ChatResponseBody>;
+    try {
+      json = (await res.json()) as Partial<ChatResponseBody>;
+    } catch {
+      throw new EndpointError(
+        "malformed",
+        "Endpoint returned non-JSON response"
+      );
+    }
     if (typeof json.content !== "string") {
-      throw new Error("Endpoint returned malformed response");
+      throw new EndpointError(
+        "malformed",
+        "Endpoint response missing `content` field"
+      );
     }
 
     return { content: json.content };
   } finally {
     clearTimeout(timer);
+    clearTimeout(timeoutWatch);
     signal?.removeEventListener("abort", externalAbort);
   }
 }

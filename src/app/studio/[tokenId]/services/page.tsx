@@ -7,6 +7,7 @@ import WalletConnect from "@/components/studio/WalletConnect";
 import OwnershipGate from "@/components/studio/OwnershipGate";
 import Steps from "@/components/studio/Steps";
 import { fetchAgentCard } from "@/lib/agent-card";
+import { KHORA_BRIDGE_URL } from "@/lib/constants";
 import type { AgentOnChainState } from "@/types/studio";
 
 function isValidTokenId(s: string): boolean {
@@ -20,10 +21,10 @@ function isValidTokenId(s: string): boolean {
  * ───────────
  * We don't ship a standalone services editor (plan non-goal: no agent-to-
  * agent marketplace). Services are auto-derived from the BOOA's traits
- * (skill + domain) by `RegisterWizard` and re-signed via Khôra whenever
- * the owner updates the identity. This page is the cockpit's SERVICES
- * detail view: it shows what's advertised on-chain today and points back
- * to the register wizard for any change.
+ * (skill + domain) at registration time and re-signed via Khôra Bridge
+ * whenever the owner updates the identity. This page is the cockpit's
+ * SERVICES detail view: it shows what's advertised on-chain today and
+ * points at khora.fun/bridge for any change.
  */
 export default function ServicesPage({
   params,
@@ -139,12 +140,20 @@ export default function ServicesPage({
                         ),
                       },
                       {
-                        title: "EDITED VIA REGISTRATION",
+                        title: "EDITED VIA KHÔRA BRIDGE",
                         body: (
                           <>
-                            To change the list, re-run the register wizard
-                            (same Shape tx, new <code>agentURI</code>). No
-                            separate tx type exists in the registry.
+                            To change the list, open{" "}
+                            <a
+                              href={KHORA_BRIDGE_URL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-accent-cyan hover:underline"
+                            >
+                              khora.fun/bridge ↗
+                            </a>{" "}
+                            — it re-signs the whole agent record (identity
+                            + services) in a single Shape tx.
                           </>
                         ),
                       },
@@ -163,12 +172,14 @@ export default function ServicesPage({
                           publish the default service derived from its
                           traits.
                         </p>
-                        <Link
-                          href={`/studio/${tokenId}/register`}
+                        <a
+                          href={KHORA_BRIDGE_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="inline-block text-[10px] px-4 py-2 mt-1 rounded border bg-accent-purple/15 border-accent-purple/50 text-accent-purple hover:bg-accent-purple/25 font-[family-name:var(--font-pixel)]"
                         >
-                          REGISTER →
-                        </Link>
+                          REGISTER ON KHÔRA ↗
+                        </a>
                       </div>
                     ) : (
                       <ul className="space-y-3">
@@ -231,16 +242,18 @@ export default function ServicesPage({
                         NEED TO CHANGE THEM?
                       </h3>
                       <p className="text-[11px] text-foreground/60 leading-relaxed">
-                        Open the register wizard — it re-signs the whole
-                        agent record (identity + services + endpoint) in a
-                        single Shape transaction via Khôra.
+                        Open Khôra Bridge — it re-signs the whole agent
+                        record (identity + services) in a single Shape
+                        transaction.
                       </p>
-                      <Link
-                        href={`/studio/${tokenId}/register`}
+                      <a
+                        href={KHORA_BRIDGE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-block text-[10px] px-3 py-1.5 rounded border border-accent-purple/40 text-accent-purple hover:bg-accent-purple/10 font-[family-name:var(--font-pixel)]"
                       >
-                        RE-REGISTER →
-                      </Link>
+                        OPEN KHÔRA BRIDGE ↗
+                      </a>
                     </section>
                   )}
 

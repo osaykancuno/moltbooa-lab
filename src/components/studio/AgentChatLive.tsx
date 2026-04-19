@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   postToAgentEndpoint,
+  EndpointError,
   type ChatMessage,
 } from "@/lib/endpoint-client";
 
@@ -25,7 +26,10 @@ export default function AgentChatLive({
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{
+    headline: string;
+    hint?: string;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -48,7 +52,7 @@ export default function AgentChatLive({
     setMessages(next);
     setInput("");
     setBusy(true);
-    setError("");
+    setError(null);
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -66,7 +70,7 @@ export default function AgentChatLive({
       ]);
     } catch (err) {
       if (controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : "Endpoint unreachable");
+      setError(describeError(err));
       // Keep the user message so they can retry.
     } finally {
       setBusy(false);
@@ -109,9 +113,14 @@ export default function AgentChatLive({
       </div>
 
       {error && (
-        <p className="text-[10px] text-accent-red font-[family-name:var(--font-mono)]">
-          {error}
-        </p>
+        <div className="rounded border border-accent-red/40 bg-accent-red/5 p-2 space-y-1 text-[10px] font-[family-name:var(--font-mono)]">
+          <div className="text-accent-red">✗ {error.headline}</div>
+          {error.hint && (
+            <div className="text-foreground/60 leading-relaxed">
+              {error.hint}
+            </div>
+          )}
+        </div>
       )}
 
       <form
@@ -145,4 +154,53 @@ export default function AgentChatLive({
       </p>
     </div>
   );
+}
+
+function describeError(err: unknown): { headline: string; hint?: string } {
+  if (err instanceof EndpointError) {
+    switch (err.kind) {
+      case "timeout":
+        return {
+          headline: "Endpoint timed out",
+          hint: "The agent took too long to reply. Serverless cold start? Try again in a moment.",
+        };
+      case "network":
+        return {
+          headline: "Could not reach endpoint",
+          hint: "Either the endpoint is offline, or CORS is blocking this origin. Owner: set ALLOWED_ORIGIN on the endpoint and redeploy.",
+        };
+      case "http": {
+        const s = err.status;
+        if (s === 429) {
+          return {
+            headline: "Rate limited (429)",
+            hint: "Too many requests to this endpoint. Wait a minute and retry.",
+          };
+        }
+        if (s === 500) {
+          return {
+            headline: "Endpoint server error (500)",
+            hint: "Owner: check function logs. Often LLM_API_KEY missing or invalid.",
+          };
+        }
+        if (s === 502) {
+          return {
+            headline: "Upstream LLM error (502)",
+            hint: "The endpoint reached the LLM provider but got an error back. Owner: verify LLM_API_KEY / LLM_MODEL.",
+          };
+        }
+        return { headline: err.message };
+      }
+      case "malformed":
+        return {
+          headline: "Endpoint returned an invalid response",
+          hint: "Make sure the endpoint follows the Moltbook chat protocol: POST /chat returning { content: string }.",
+        };
+      case "invalid_url":
+        return { headline: err.message };
+    }
+  }
+  return {
+    headline: err instanceof Error ? err.message : "Endpoint unreachable",
+  };
 }
