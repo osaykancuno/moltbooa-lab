@@ -4,6 +4,7 @@ import Header from "@/components/Header";
 import AgentChatLive from "@/components/studio/AgentChatLive";
 import { fetchFullBOOAServer } from "@/lib/khora-api-server";
 import { validateEndpointUrl } from "@/lib/endpoint-validator";
+import { KHORA_BRIDGE_URL } from "@/lib/constants";
 
 function isValidTokenId(s: string): boolean {
   return /^\d+$/.test(s) && Number(s) >= 0 && Number(s) <= 3332;
@@ -64,6 +65,7 @@ export default async function AgentPublicPage({
     : ({ ok: false, reason: "no endpoint set" } as const);
 
   const endpointUrl = endpointCheck.ok ? endpointCheck.url.toString() : null;
+  const isRegistered = !!data.registration?.registrations?.[0]?.agentId;
 
   const { traits, token } = data;
 
@@ -139,21 +141,47 @@ export default async function AgentPublicPage({
                   {endpointCheck.reason}
                 </p>
               )}
-              <div className="text-[11px] text-foreground/50 space-y-1 pt-2">
+              <div className="text-[11px] text-foreground/50 space-y-2 pt-2 text-left max-w-md mx-auto">
                 <p>
                   <strong className="text-foreground/70">
                     Are you the owner?
-                  </strong>{" "}
-                  Open the{" "}
-                  <Link
-                    href={`/studio/${tokenId}`}
-                    className="text-accent-purple hover:underline"
-                  >
-                    Studio cockpit
-                  </Link>{" "}
-                  to set up an endpoint in a few minutes.
+                  </strong>
                 </p>
-                <p>
+                {!isRegistered ? (
+                  <p>
+                    1. Register identity on{" "}
+                    <a
+                      href={KHORA_BRIDGE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent-cyan hover:underline"
+                    >
+                      khora.fun/bridge ↗
+                    </a>{" "}
+                    (one Shape tx).<br />
+                    2. Deploy an endpoint from the{" "}
+                    <Link
+                      href={`/studio/${tokenId}`}
+                      className="text-accent-purple hover:underline"
+                    >
+                      Studio cockpit
+                    </Link>
+                    .
+                  </p>
+                ) : (
+                  <p>
+                    Deploy an endpoint from the{" "}
+                    <Link
+                      href={`/studio/${tokenId}`}
+                      className="text-accent-purple hover:underline"
+                    >
+                      Studio cockpit
+                    </Link>
+                    . Identity is already on ERC-8004; only the endpoint URL
+                    is missing.
+                  </p>
+                )}
+                <p className="pt-1">
                   <strong className="text-foreground/70">Just visiting?</strong>{" "}
                   You can still explore what this BOOA might do:
                 </p>

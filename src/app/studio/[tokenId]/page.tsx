@@ -7,6 +7,7 @@ import WalletConnect from "@/components/studio/WalletConnect";
 import OwnershipGate from "@/components/studio/OwnershipGate";
 import AgentStatusCard from "@/components/studio/AgentStatusCard";
 import { fetchAgentCard } from "@/lib/agent-card";
+import { KHORA_BRIDGE_URL } from "@/lib/constants";
 import type { AgentOnChainState } from "@/types/studio";
 
 function isValidTokenId(s: string): boolean {
@@ -117,7 +118,7 @@ export default function CockpitPage({
                 )}
 
                 {!loading && !error && state && (
-                  <div className="rounded border border-card-border bg-card-bg/40 p-4 text-[11px] text-foreground/60 leading-relaxed space-y-1">
+                  <div className="rounded border border-card-border bg-card-bg/40 p-4 text-[11px] text-foreground/60 leading-relaxed space-y-2">
                     <p>
                       <span className="font-[family-name:var(--font-pixel)] text-[10px] text-foreground/50">
                         TIP ·{" "}
@@ -128,6 +129,23 @@ export default function CockpitPage({
                     <p className="text-foreground/40">
                       Progress updates automatically as transactions confirm
                       on-chain (may take 10–30 seconds).
+                    </p>
+                    <p className="text-foreground/40 pt-1 border-t border-card-border">
+                      <span className="font-[family-name:var(--font-pixel)] text-[10px] text-foreground/50">
+                        HOW THIS WORKS ·{" "}
+                      </span>
+                      Identity lives on ERC-8004 and is registered via the
+                      official community tool{" "}
+                      <a
+                        href={KHORA_BRIDGE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent-cyan hover:underline"
+                      >
+                        khora.fun/bridge ↗
+                      </a>
+                      . Moltbook Studio handles everything else — deploying
+                      the agent endpoint and running the public chat.
                     </p>
                   </div>
                 )}

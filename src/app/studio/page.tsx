@@ -59,6 +59,18 @@ export default function StudioHome() {
             Activate your BOOA for real. Your wallet signs everything — we
             never hold keys, you never hand over secrets.
           </p>
+          <p className="text-[10px] text-foreground/40 max-w-xl mx-auto font-[family-name:var(--font-mono)] pt-1">
+            Identity on ERC-8004 via{" "}
+            <a
+              href="https://khora.fun/bridge"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent-cyan hover:underline"
+            >
+              khora.fun/bridge ↗
+            </a>
+            {" "}· endpoint + public chat via Moltbook Studio.
+          </p>
         </div>
 
         <div className="flex justify-center mb-10">
