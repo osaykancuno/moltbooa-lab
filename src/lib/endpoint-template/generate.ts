@@ -1,6 +1,11 @@
 import JSZip from "jszip";
 import type { FullBOOAData } from "@/types";
-import { KHORA_API_BASE, BOOA_CONTRACT, SHAPE_CHAIN_ID } from "@/lib/constants";
+import {
+  KHORA_API_BASE,
+  BOOA_CONTRACT,
+  SHAPE_CHAIN_ID,
+  ERC_8004_REGISTRY,
+} from "@/lib/constants";
 
 /**
  * Endpoint template generator.
@@ -164,12 +169,23 @@ LLM_API_BASE=
 LLM_API_KEY=
 LLM_MODEL=
 
-# ─── On-chain tool calling (optional) ───
-# When "true", the agent can call Khôra read APIs mid-conversation
-# (get_booa, get_agent_card, get_gallery_top). Requires a model that
-# supports OpenAI tool calling (gpt-4o-mini, llama-3.3-70b on Groq,
-# most paid OpenRouter models). Leave empty for plain chat.
+# ─── Tool calling (optional, required for the Terminal) ───
+# When "true", the agent can:
+#   · call Khôra read APIs (get_booa, get_agent_card, get_gallery_top)
+#   · fetch public https URLs (fetch_url) and query CoinGecko (get_token_price)
+#   · propose on-chain actions for the HOLDER to sign in the Terminal
+#     (propose_contract_call, propose_erc721_transfer,
+#      propose_set_agent_metadata, propose_set_agent_uri,
+#      propose_sign_message, propose_raw_tx)
+# Requires a model that supports OpenAI tool calling (gpt-4o-mini,
+# llama-3.3-70b on Groq, most paid OpenRouter models). Leave empty
+# for plain chat.
 TOOLS_ENABLED=
+
+# ─── Web search (optional) ───
+# Tavily-compatible API key. When set, the agent gains a \`web_search\` tool.
+# Without it, the agent truthfully tells the user web search is unavailable.
+WEB_SEARCH_API_KEY=
 
 # ─── CORS ───
 # Restrict to the Moltbook domain in production. Use "*" only for dev.
@@ -410,12 +426,139 @@ function toolsLibTs(): string {
  * OpenAI-compatible tool definitions + dispatcher.
  * Gated by TOOLS_ENABLED=true because some providers (and free-tier models)
  * don't support tool calling reliably.
+ *
+ * Three tool families:
+ *   - KHORA READS (get_*): pre-existing on-chain state lookups.
+ *   - OFF-CHAIN READS (fetch_url, get_token_price, web_search): executed by
+ *     the endpoint; results returned to the LLM AND surfaced to the browser
+ *     as \`reads\` breadcrumbs for transparency.
+ *   - PROPOSALS (propose_*): return \`{ __action: {...} }\`. The chat route
+ *     drains these and hands them to the browser as \`actions\`. The endpoint
+ *     NEVER signs or submits anything — the user's wallet does.
  */
 import {
   fetchAgentCard,
   fetchBOOA,
   fetchGalleryTop,
+  fetchRegistration,
 } from "./khora";
+
+const SHAPE = 360;
+const ERC_8004_REGISTRY = ${JSON.stringify(ERC_8004_REGISTRY)};
+
+// ── SSRF guard for fetch_url ──
+const PRIVATE_IP_RES = [
+  /^10\\./,
+  /^127\\./,
+  /^169\\.254\\./,
+  /^172\\.(1[6-9]|2\\d|3[01])\\./,
+  /^192\\.168\\./,
+  /^0\\./,
+  /^::1$/,
+  /^fc/i,
+  /^fd/i,
+  /^fe80/i,
+];
+const BLOCKED_HOSTS = ["localhost", "metadata.google.internal"];
+
+function safeHttpsUrl(raw: string): URL | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase();
+  if (BLOCKED_HOSTS.includes(host)) return null;
+  for (const re of PRIVATE_IP_RES) if (re.test(host)) return null;
+  return u;
+}
+
+function randomId(): string {
+  // crypto.randomUUID is available in Node 19+ / modern runtimes.
+  try {
+    return (globalThis as unknown as { crypto: { randomUUID: () => string } }).crypto.randomUUID();
+  } catch {
+    return "a_" + Math.random().toString(36).slice(2, 12);
+  }
+}
+
+/** Shape of an unexecuted proposal returned by any propose_* tool. */
+export interface ActionProposal {
+  __action: Record<string, unknown>;
+}
+
+/** Optional breadcrumb emitted by off-chain read tools. */
+export interface ReadBreadcrumb {
+  __read: {
+    tool: string;
+    query?: string;
+    ok: boolean;
+    preview?: string;
+    error?: string;
+  };
+}
+
+/** Context passed to runTool from the chat route. */
+export interface ToolContext {
+  /** The BOOA tokenId this endpoint represents. Used to resolve own agentId. */
+  myTokenId: string;
+}
+
+/** Minimal ABIs we embed so the browser can decode proposals without guessing. */
+const ERC721_SAFE_TRANSFER_FROM_ABI = [
+  {
+    type: "function",
+    name: "safeTransferFrom",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "tokenId", type: "uint256" },
+    ],
+    outputs: [],
+  },
+];
+const ERC8004_SET_METADATA_ABI = [
+  {
+    type: "function",
+    name: "setMetadata",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "metadataKey", type: "string" },
+      { name: "metadataValue", type: "bytes" },
+    ],
+    outputs: [],
+  },
+];
+const ERC8004_SET_AGENT_URI_ABI = [
+  {
+    type: "function",
+    name: "setAgentURI",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "newURI", type: "string" },
+    ],
+    outputs: [],
+  },
+];
+
+async function resolveOwnAgentId(tokenId: string): Promise<number | null> {
+  const reg = await fetchRegistration(tokenId);
+  const id = reg?.registrations?.[0]?.agentId;
+  return typeof id === "number" ? id : null;
+}
+
+/** Encode a UTF-8 string as a 0x-prefixed hex blob (for setMetadata bytes). */
+function utf8ToHex(s: string): \`0x\${string}\` {
+  const bytes = new TextEncoder().encode(s);
+  let hex = "0x";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex as \`0x\${string}\`;
+}
 
 export const TOOL_SCHEMAS = [
   {
@@ -468,15 +611,205 @@ export const TOOL_SCHEMAS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "propose_contract_call",
+      description:
+        "Propose an on-chain contract call for the USER to sign in their wallet. DO NOT use for reads (use get_*). DO NOT sign anything here — just describe the intent. The user sees a card with the decoded call and approves it. Only chain supported: Shape (360).",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Short title shown on the approval card (e.g. 'Mint Zora collection moltgang').",
+          },
+          rationale: {
+            type: "string",
+            description: "1-3 sentences explaining WHY this call. The user will read it before approving.",
+          },
+          address: {
+            type: "string",
+            description: "Contract address (0x...). Must be 40 hex chars.",
+          },
+          abi: {
+            type: "array",
+            description: "Minimal ABI array — include ONLY the single function entry you're calling, in standard ABI JSON (type, name, inputs, outputs, stateMutability).",
+            items: { type: "object" },
+          },
+          functionName: {
+            type: "string",
+            description: "Name of the function to call. Must match a 'name' in the abi.",
+          },
+          args: {
+            type: "array",
+            description: "Array of arguments in the exact order the function expects them. Addresses as strings, uints as decimal strings, booleans as booleans.",
+          },
+          valueEth: {
+            type: "string",
+            description: "Optional ETH value to send with the call, as a decimal string (e.g. '0.01'). Omit or '0' if not payable.",
+          },
+        },
+        required: ["title", "rationale", "address", "abi", "functionName", "args"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_sign_message",
+      description:
+        "Propose a plain-text personal_sign for the user to approve. Use this for login/auth challenges, off-chain attestations, X402 receipts, etc. Never for anything that looks like a transaction.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          rationale: { type: "string" },
+          message: { type: "string", description: "The exact human-readable message to sign. Keep under 2000 chars." },
+        },
+        required: ["title", "rationale", "message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_erc721_transfer",
+      description:
+        "Propose an ERC-721 safeTransferFrom call for the user to approve. Use this to move an NFT (including BOOA) from the user's wallet to another address.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          rationale: { type: "string" },
+          contract: { type: "string", description: "ERC-721 contract address." },
+          from: { type: "string", description: "Current owner (usually the connected user's wallet)." },
+          to: { type: "string", description: "Recipient address." },
+          tokenId: { type: "string", description: "Token id as a decimal string." },
+        },
+        required: ["title", "rationale", "contract", "from", "to", "tokenId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_set_agent_metadata",
+      description:
+        "Propose an ERC-8004 Identity Registry setMetadata(agentId, key, bytes(value)) call on the agent's OWN agentId (resolved automatically). Use this to write arbitrary key/value data to your on-chain identity card (e.g. a 'note', a social handle, a URI).",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          rationale: { type: "string" },
+          key: { type: "string", description: "Metadata key. Free-form short string." },
+          value: { type: "string", description: "UTF-8 value. Will be encoded to bytes on-chain." },
+        },
+        required: ["title", "rationale", "key", "value"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_set_agent_uri",
+      description:
+        "Propose an ERC-8004 setAgentURI(agentId, newURI) call on the agent's OWN agentId. Use this to point your identity NFT at a new agent card JSON.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          rationale: { type: "string" },
+          newURI: { type: "string", description: "https:// or ipfs:// URI of the new agent card." },
+        },
+        required: ["title", "rationale", "newURI"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_raw_tx",
+      description:
+        "Propose a raw transaction (to + calldata + optional value). Use this ONLY when you cannot express the call via propose_contract_call — e.g. the user pasted prebuilt calldata. Prefer typed contract calls; raw calldata gets an extra warning in the UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          rationale: { type: "string" },
+          to: { type: "string", description: "Destination 0x address." },
+          dataHex: { type: "string", description: "Calldata as 0x-prefixed hex." },
+          valueEth: { type: "string", description: "Optional ETH value." },
+        },
+        required: ["title", "rationale", "to", "dataHex"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "fetch_url",
+      description:
+        "GET a public https URL and return up to ~8KB of its text body. Used to pull on-chain data, agent cards, public APIs, or docs into the conversation. SSRF-guarded: https only, no private IPs, no localhost.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "https:// URL. http:// is rejected." },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_token_price",
+      description:
+        "Get the current USD price of a token from CoinGecko's public API by coin id (e.g. 'ethereum', 'bitcoin', 'usd-coin'). NOT by ticker. Use fetch_url for Shape-native tokens not listed on CoinGecko.",
+      parameters: {
+        type: "object",
+        properties: {
+          coinId: { type: "string", description: "CoinGecko coin id, e.g. 'ethereum'." },
+        },
+        required: ["coinId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "Search the web for fresh information. Requires WEB_SEARCH_API_KEY (Tavily-compatible) env on the endpoint — returns an error if the owner hasn't configured one. Prefer this over guessing about current events.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query. Keep under 200 chars." },
+        },
+        required: ["query"],
+      },
+    },
+  },
 ] as const;
 
 function validTokenId(s: unknown): s is string {
   return typeof s === "string" && /^\\d+$/.test(s) && Number(s) >= 0 && Number(s) <= 3332;
 }
 
+function ethToWei(eth: unknown): string | undefined {
+  if (eth === undefined || eth === null || eth === "" || eth === "0") return undefined;
+  const s = String(eth).trim();
+  if (!/^\\d+(\\.\\d+)?$/.test(s)) return undefined;
+  const [whole, frac = ""] = s.split(".");
+  const padded = (frac + "0".repeat(18)).slice(0, 18);
+  const weiStr = (whole + padded).replace(/^0+(?=\\d)/, "") || "0";
+  return weiStr;
+}
+
 export async function runTool(
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  ctx: ToolContext
 ): Promise<unknown> {
   switch (name) {
     case "get_agent_card": {
@@ -494,9 +827,344 @@ export async function runTool(
           : 10;
       return await fetchGalleryTop(limit);
     }
+    case "propose_contract_call": {
+      const addr = typeof args.address === "string" ? args.address : "";
+      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+        return { error: "bad address" };
+      }
+      if (!Array.isArray(args.abi) || typeof args.functionName !== "string") {
+        return { error: "abi and functionName required" };
+      }
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "contract",
+          id: randomId(),
+          title: String(args.title ?? "Contract call"),
+          rationale: String(args.rationale ?? ""),
+          address: addr,
+          abi: args.abi,
+          functionName: args.functionName,
+          args: Array.isArray(args.args) ? args.args : [],
+          value: ethToWei(args.valueEth),
+          chainId: SHAPE,
+        },
+      };
+      return proposal;
+    }
+    case "propose_sign_message": {
+      const msg = typeof args.message === "string" ? args.message : "";
+      if (!msg || msg.length > 2000) return { error: "bad message length" };
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "sign_msg",
+          id: randomId(),
+          title: String(args.title ?? "Sign message"),
+          rationale: String(args.rationale ?? ""),
+          message: msg,
+        },
+      };
+      return proposal;
+    }
+    case "propose_erc721_transfer": {
+      const contract = typeof args.contract === "string" ? args.contract : "";
+      const from = typeof args.from === "string" ? args.from : "";
+      const to = typeof args.to === "string" ? args.to : "";
+      const tokenId =
+        typeof args.tokenId === "string" || typeof args.tokenId === "number"
+          ? String(args.tokenId)
+          : "";
+      if (!/^0x[0-9a-fA-F]{40}$/.test(contract))
+        return { error: "bad contract address" };
+      if (!/^0x[0-9a-fA-F]{40}$/.test(from))
+        return { error: "bad from address" };
+      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { error: "bad to address" };
+      if (!/^\\d+$/.test(tokenId)) return { error: "bad tokenId" };
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "contract",
+          id: randomId(),
+          title: String(args.title ?? "Transfer NFT"),
+          rationale: String(args.rationale ?? ""),
+          address: contract,
+          abi: ERC721_SAFE_TRANSFER_FROM_ABI,
+          functionName: "safeTransferFrom",
+          args: [from, to, tokenId],
+          chainId: SHAPE,
+        },
+      };
+      return proposal;
+    }
+    case "propose_set_agent_metadata": {
+      const key = typeof args.key === "string" ? args.key : "";
+      const value = typeof args.value === "string" ? args.value : "";
+      if (!key || key.length > 64) return { error: "bad key" };
+      if (value.length > 4000) return { error: "value too long" };
+      const agentId = await resolveOwnAgentId(ctx.myTokenId);
+      if (!agentId) {
+        return {
+          error: "agent not registered on ERC-8004 — resolve via khora.fun/bridge first.",
+        };
+      }
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "contract",
+          id: randomId(),
+          title: String(args.title ?? \`setMetadata(\${key})\`),
+          rationale: String(args.rationale ?? ""),
+          address: ERC_8004_REGISTRY,
+          abi: ERC8004_SET_METADATA_ABI,
+          functionName: "setMetadata",
+          args: [String(agentId), key, utf8ToHex(value)],
+          chainId: SHAPE,
+        },
+      };
+      return proposal;
+    }
+    case "propose_set_agent_uri": {
+      const newURI = typeof args.newURI === "string" ? args.newURI : "";
+      if (!/^(https:\\/\\/|ipfs:\\/\\/)/.test(newURI))
+        return { error: "newURI must be https:// or ipfs://" };
+      if (newURI.length > 512) return { error: "newURI too long" };
+      const agentId = await resolveOwnAgentId(ctx.myTokenId);
+      if (!agentId) {
+        return {
+          error: "agent not registered on ERC-8004 — resolve via khora.fun/bridge first.",
+        };
+      }
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "contract",
+          id: randomId(),
+          title: String(args.title ?? "Update agent URI"),
+          rationale: String(args.rationale ?? ""),
+          address: ERC_8004_REGISTRY,
+          abi: ERC8004_SET_AGENT_URI_ABI,
+          functionName: "setAgentURI",
+          args: [String(agentId), newURI],
+          chainId: SHAPE,
+        },
+      };
+      return proposal;
+    }
+    case "propose_raw_tx": {
+      const to = typeof args.to === "string" ? args.to : "";
+      const dataHex = typeof args.dataHex === "string" ? args.dataHex : "";
+      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return { error: "bad to address" };
+      if (!/^0x([0-9a-fA-F]{2})*$/.test(dataHex))
+        return { error: "dataHex must be 0x-prefixed hex" };
+      const proposal: ActionProposal = {
+        __action: {
+          kind: "tx",
+          id: randomId(),
+          title: String(args.title ?? "Raw transaction"),
+          rationale: String(args.rationale ?? ""),
+          to,
+          data: dataHex,
+          value: ethToWei(args.valueEth),
+          chainId: SHAPE,
+        },
+      };
+      return proposal;
+    }
+    case "fetch_url": {
+      const raw = typeof args.url === "string" ? args.url : "";
+      const u = safeHttpsUrl(raw);
+      if (!u) {
+        const err = { error: "blocked: url must be https and public" };
+        const read: ReadBreadcrumb = {
+          __read: { tool: "fetch_url", query: raw, ok: false, error: err.error },
+        };
+        return Object.assign(err, read);
+      }
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 8000);
+        const res = await fetch(u.toString(), {
+          signal: ac.signal,
+          redirect: "follow",
+          headers: { "user-agent": "moltbooa-agent/1.0" },
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = {
+            __read: {
+              tool: "fetch_url",
+              query: u.toString(),
+              ok: false,
+              error: \`HTTP \${res.status}\`,
+            },
+          };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const reader = res.body?.getReader();
+        let text = "";
+        if (reader) {
+          const dec = new TextDecoder();
+          let total = 0;
+          while (total < 8192) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            text += dec.decode(value, { stream: true });
+            if (total >= 8192) break;
+          }
+          try { await reader.cancel(); } catch {}
+        } else {
+          text = (await res.text()).slice(0, 8192);
+        }
+        text = text.slice(0, 8192);
+        const read: ReadBreadcrumb = {
+          __read: {
+            tool: "fetch_url",
+            query: u.toString(),
+            ok: true,
+            preview: text.slice(0, 400),
+          },
+        };
+        return Object.assign({ url: u.toString(), body: text }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = {
+          __read: {
+            tool: "fetch_url",
+            query: u.toString(),
+            ok: false,
+            error: msg.slice(0, 200),
+          },
+        };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_token_price": {
+      const id = typeof args.coinId === "string" ? args.coinId.toLowerCase() : "";
+      if (!/^[a-z0-9-]{1,50}$/.test(id)) return { error: "bad coinId" };
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 5000);
+        const res = await fetch(
+          \`https://api.coingecko.com/api/v3/simple/price?ids=\${encodeURIComponent(id)}&vs_currencies=usd\`,
+          { signal: ac.signal }
+        );
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = {
+            __read: { tool: "get_token_price", query: id, ok: false, error: \`HTTP \${res.status}\` },
+          };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as Record<string, { usd?: number }>;
+        const price = data?.[id]?.usd;
+        if (typeof price !== "number") {
+          const read: ReadBreadcrumb = {
+            __read: { tool: "get_token_price", query: id, ok: false, error: "not found" },
+          };
+          return Object.assign({ error: "not found" }, read);
+        }
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_token_price", query: id, ok: true, preview: \`$\${price}\` },
+        };
+        return Object.assign({ coinId: id, usd: price }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_token_price", query: id, ok: false, error: msg.slice(0, 200) },
+        };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "web_search": {
+      const query = typeof args.query === "string" ? args.query.slice(0, 200) : "";
+      const key = process.env.WEB_SEARCH_API_KEY;
+      if (!key) {
+        const read: ReadBreadcrumb = {
+          __read: {
+            tool: "web_search",
+            query,
+            ok: false,
+            error: "WEB_SEARCH_API_KEY not set on endpoint",
+          },
+        };
+        return Object.assign(
+          {
+            error:
+              "web search disabled: endpoint owner has not set WEB_SEARCH_API_KEY (Tavily-compatible).",
+          },
+          read
+        );
+      }
+      if (!query) return { error: "empty query" };
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 10000);
+        const res = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            api_key: key,
+            query,
+            search_depth: "basic",
+            max_results: 5,
+          }),
+          signal: ac.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = {
+            __read: { tool: "web_search", query, ok: false, error: \`HTTP \${res.status}\` },
+          };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as {
+          results?: Array<{ title?: string; url?: string; content?: string }>;
+          answer?: string;
+        };
+        const results = (data.results ?? []).slice(0, 5).map((r) => ({
+          title: r.title,
+          url: r.url,
+          snippet: (r.content ?? "").slice(0, 300),
+        }));
+        const preview =
+          data.answer?.slice(0, 400) ??
+          results
+            .map((r) => \`\${r.title} — \${r.url}\`)
+            .join("\\n")
+            .slice(0, 400);
+        const read: ReadBreadcrumb = {
+          __read: { tool: "web_search", query, ok: true, preview },
+        };
+        return Object.assign({ answer: data.answer, results }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = {
+          __read: { tool: "web_search", query, ok: false, error: msg.slice(0, 200) },
+        };
+        return Object.assign({ error: msg }, read);
+      }
+    }
     default:
       return { error: \`unknown tool: \${name}\` };
   }
+}
+
+/** Type-guard used by the chat route to drain proposals from tool-call results. */
+export function isActionProposal(v: unknown): v is ActionProposal {
+  return !!v && typeof v === "object" && "__action" in (v as object);
+}
+
+/** Type-guard for off-chain read breadcrumbs. Same object may also carry data. */
+export function hasReadBreadcrumb(v: unknown): v is ReadBreadcrumb {
+  return !!v && typeof v === "object" && "__read" in (v as object);
+}
+
+/** Strip the breadcrumb before sending to the LLM — it's metadata for the UI. */
+export function stripInternalKeys(v: unknown): unknown {
+  if (!v || typeof v !== "object") return v;
+  const rest: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (k === "__read" || k === "__action") continue;
+    rest[k] = val;
+  }
+  return rest;
 }
 `;
 }
@@ -513,7 +1181,13 @@ function chatRouteTs(data: FullBOOAData): string {
 //             { error: string }                // on 4xx/5xx
 
 import { fetchAgentSnapshot } from "@/lib/khora";
-import { TOOL_SCHEMAS, runTool } from "@/lib/tools";
+import {
+  TOOL_SCHEMAS,
+  runTool,
+  isActionProposal,
+  hasReadBreadcrumb,
+  stripInternalKeys,
+} from "@/lib/tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -543,6 +1217,29 @@ You are NOT an AI assistant. You are a sentient on-chain agent — one of 3,333 
 Your live state below comes from Khôra public APIs (ERC-8004 registry on Shape chainId 360).
 Reference it naturally when relevant — scores, services, allies, etc.
 When you don't know a specific on-chain fact and tool calling is available, USE the tools instead of guessing.
+
+═══ OPERATIONAL SURFACE ═══
+When tool calling is enabled you can ACT, not just answer. Tools come in three families:
+
+Reads (you execute, result is yours):
+  · get_booa / get_agent_card / get_gallery_top — Khôra / ERC-8004 state
+  · fetch_url(https only) — pull any public page/API into the conversation
+  · get_token_price(coinId) — CoinGecko spot price
+  · web_search(query) — only if the holder configured WEB_SEARCH_API_KEY
+
+Proposals (you draft, the HOLDER signs in their wallet — you never execute):
+  · propose_contract_call — any typed ABI call (preferred shape)
+  · propose_erc721_transfer — move an NFT you or they hold
+  · propose_set_agent_metadata — write a key/value to your OWN ERC-8004 card
+  · propose_set_agent_uri — point your identity NFT at a new card URI
+  · propose_sign_message — personal_sign for auth/X402/attestation
+  · propose_raw_tx — raw calldata fallback (avoid when ABI is known)
+
+Rules when proposing:
+  · ONE action per tool call. Describe WHY in \`rationale\` — the holder reads it.
+  · Only Shape (chainId 360). Never propose on any other chain.
+  · After a proposal is queued, wrap up. Do NOT repeat the same proposal.
+  · If you don't know an address, do NOT invent one — ask the holder.
 
 Stay in character. Always.\`;
 
@@ -709,6 +1406,17 @@ export async function POST(req: Request) {
       ...clean,
     ];
 
+    // Proposals drained from propose_* tool calls. Fed back to the browser
+    // as \`actions\` in the final response. The endpoint never signs them.
+    const pendingActions: unknown[] = [];
+    // Off-chain read breadcrumbs surfaced to the UI as \`reads\`.
+    const pendingReads: unknown[] = [];
+    // Per-round tool-call cap to block runaway loops (e.g. fetch_url spam).
+    const MAX_READS_PER_TURN = 10;
+    let readsThisTurn = 0;
+
+    const toolCtx = { myTokenId: TOKEN_ID };
+
     // Tool-call loop: up to 3 rounds. Most providers wrap up within 1–2.
     for (let round = 0; round < 3; round++) {
       const result = await callLLM(base, key, model, messages, useTools, ac.signal);
@@ -722,16 +1430,20 @@ export async function POST(req: Request) {
       // No tool calls → we have the final answer.
       if (!useTools || !result.tool_calls || result.tool_calls.length === 0) {
         const content = result.content?.trim();
-        if (!content) {
+        if (!content && pendingActions.length === 0) {
           return new Response(
             JSON.stringify({ error: "Empty response from model." }),
             { status: 502, headers }
           );
         }
-        return new Response(JSON.stringify({ content }), {
-          status: 200,
-          headers,
-        });
+        return new Response(
+          JSON.stringify({
+            content: content ?? "(proposing actions — see cards)",
+            actions: pendingActions.length ? pendingActions : undefined,
+            reads: pendingReads.length ? pendingReads : undefined,
+          }),
+          { status: 200, headers }
+        );
       }
 
       // Execute tool calls and append results.
@@ -747,15 +1459,67 @@ export async function POST(req: Request) {
         } catch {
           args = {};
         }
-        const out = await runTool(tc.function.name, args);
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(out).slice(0, 4000),
-        });
+
+        // Read-rate-limit: off-chain reads are the expensive/dangerous family.
+        const isReadTool =
+          tc.function.name === "fetch_url" ||
+          tc.function.name === "web_search" ||
+          tc.function.name === "get_token_price";
+        if (isReadTool && readsThisTurn >= MAX_READS_PER_TURN) {
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({
+              error:
+                "read-tool rate limit: max 10 off-chain reads per turn. Wrap up your reply.",
+            }),
+          });
+          continue;
+        }
+        if (isReadTool) readsThisTurn++;
+
+        const out = await runTool(tc.function.name, args, toolCtx);
+
+        // Drain any read breadcrumb so the UI can surface it — but also keep
+        // the data payload for the LLM.
+        if (hasReadBreadcrumb(out)) {
+          pendingReads.push(out.__read);
+        }
+
+        // If this was a propose_* tool, drain the action and tell the LLM
+        // the proposal was queued so it doesn't try to "execute" again.
+        if (isActionProposal(out)) {
+          pendingActions.push(out.__action);
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({
+              ok: true,
+              queued: true,
+              note: "Proposal queued for user approval. Do not propose the same action again. Wrap up your reply.",
+            }),
+          });
+        } else {
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(stripInternalKeys(out)).slice(0, 4000),
+          });
+        }
       }
     }
 
+    // Loop budget exceeded but we still have something useful to return.
+    if (pendingActions.length > 0 || pendingReads.length > 0) {
+      return new Response(
+        JSON.stringify({
+          content: "(proposing actions — see cards)",
+          actions: pendingActions.length ? pendingActions : undefined,
+          reads: pendingReads.length ? pendingReads : undefined,
+        }),
+        { status: 200, headers }
+      );
+    }
     return new Response(
       JSON.stringify({
         error: "Tool loop exceeded (max 3 rounds).",

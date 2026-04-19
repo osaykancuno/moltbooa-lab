@@ -1,4 +1,5 @@
 import { validateEndpointUrl } from "@/lib/endpoint-validator";
+import type { AgentAction, AgentRead } from "@/lib/actions/types";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -10,8 +11,18 @@ export interface ChatRequestBody {
   tokenId: string;
 }
 
+/**
+ * Response shape from the holder-deployed endpoint.
+ *
+ * `content` is required (backward compat with v1 templates that only reply
+ * text). `actions` and `reads` appear on v2 templates with tool surface
+ * enabled — the terminal uses them, the public chat (`/agent/[id]`) safely
+ * ignores them.
+ */
 export interface ChatResponseBody {
   content: string;
+  actions?: AgentAction[];
+  reads?: AgentRead[];
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -120,7 +131,11 @@ export async function postToAgentEndpoint(
       );
     }
 
-    return { content: json.content };
+    return {
+      content: json.content,
+      actions: Array.isArray(json.actions) ? json.actions : undefined,
+      reads: Array.isArray(json.reads) ? json.reads : undefined,
+    };
   } finally {
     clearTimeout(timer);
     clearTimeout(timeoutWatch);

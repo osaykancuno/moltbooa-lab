@@ -176,6 +176,23 @@ export default function AgentStatusCard({ state }: Props) {
             tone="neutral"
           />
         </div>
+        {endpointSet && (
+          <div className="pt-2">
+            <Link
+              href={`/studio/${state.tokenId}/terminal`}
+              className={`block text-center text-[11px] px-4 py-3 rounded border font-[family-name:var(--font-pixel)] transition-all ${
+                live
+                  ? "bg-accent-cyan/20 border-accent-cyan/50 text-accent-cyan hover:bg-accent-cyan/30 ring-2 ring-accent-cyan/30"
+                  : "bg-accent-cyan/10 border-accent-cyan/30 text-accent-cyan/80 hover:bg-accent-cyan/20"
+              }`}
+            >
+              ▸ OPEN AGENT TERMINAL
+              <span className="block mt-1 text-[9px] text-foreground/50">
+                drive your agent · propose &amp; sign on-chain actions
+              </span>
+            </Link>
+          </div>
+        )}
       </section>
     </div>
   );

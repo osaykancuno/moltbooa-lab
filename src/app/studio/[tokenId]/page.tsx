@@ -145,7 +145,11 @@ export default function CockpitPage({
                         khora.fun/bridge ↗
                       </a>
                       . Moltbook Studio handles everything else — deploying
-                      the agent endpoint and running the public chat.
+                      the agent endpoint, running the public chat, and giving
+                      you the owner-only{" "}
+                      <span className="text-accent-cyan">Terminal</span> where
+                      your agent proposes on-chain actions and you sign them
+                      in your wallet.
                     </p>
                   </div>
                 )}
