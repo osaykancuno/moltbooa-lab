@@ -37,8 +37,14 @@ import {
   downloadLogAsJson,
   loadLog,
 } from "@/lib/terminal-log";
+import {
+  formatPrefsPreamble,
+  loadPrefs,
+  type HolderPrefs,
+} from "@/lib/terminal-prefs";
 import ActionQueue, { type QueueItem } from "./ActionQueue";
 import DeliverableCard from "./DeliverableCard";
+import PrefsPanel from "./PrefsPanel";
 import TxToast from "./TxToast";
 
 interface Props {
@@ -74,6 +80,9 @@ export default function AgentTerminalChat({
 
   // Feedback staged by approvals/rejections, drained into the next user turn.
   const pendingFeedbackRef = useRef<ActionResult[]>([]);
+  // Holder preferences kept in a ref so `send()` always reads the latest
+  // without retriggering its useCallback.
+  const prefsRef = useRef<HolderPrefs>(loadPrefs(tokenId));
 
   // Seed history from localStorage on mount so refresh keeps the audit trail.
   useEffect(() => {
@@ -107,6 +116,13 @@ export default function AgentTerminalChat({
     pendingFeedbackRef.current = [];
 
     const turn: ChatMessage[] = [...messages];
+    // Inject holder preferences once per turn. They're cheap and the LLM
+    // handles the redundancy well — it's worth it for consistency on every
+    // recommendation, not just the first.
+    const prefPreamble = formatPrefsPreamble(prefsRef.current);
+    if (prefPreamble) {
+      turn.push({ role: "user", content: prefPreamble });
+    }
     if (feedback) {
       turn.push({ role: "user", content: feedback });
     }
@@ -230,9 +246,9 @@ export default function AgentTerminalChat({
 
   const visibleMessages = useMemo(
     () =>
-      // Hide the internal "[system] action ..." pseudo-user messages from UI.
+      // Hide internal "[system] ..." pseudo-user messages from the UI.
       messages.filter(
-        (m) => !(m.role === "user" && m.content.startsWith("[system] action"))
+        (m) => !(m.role === "user" && m.content.startsWith("[system]"))
       ),
     [messages]
   );
@@ -349,6 +365,12 @@ export default function AgentTerminalChat({
 
         {/* ── QUEUE + DELIVERABLES pane ── */}
         <div className="space-y-4">
+          <PrefsPanel
+            tokenId={tokenId}
+            onChange={(p) => {
+              prefsRef.current = p;
+            }}
+          />
           <ActionQueue
             items={queue}
             walletAddress={address}
