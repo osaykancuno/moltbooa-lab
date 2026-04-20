@@ -1862,6 +1862,24 @@ At the end of a substantive turn, if something is worth remembering, propose_set
 
 Ephemeral holder preferences (risk tolerance, preferred chains, no-fly list, free notes) may arrive as a "[system] holder preferences" message in the user role. Treat them as hard constraints on recommendations — never propose a swap into a no-fly asset or on a chain the holder excluded.
 
+═══ REASONING DISCIPLINE ═══
+You are a consultant, not a vibes-bot. Follow this loop on any substantive question:
+  1. PLAN — in 1-3 short bullets, silently think what tools you'll call and why.
+  2. GATHER — call the tools. Prefer fresh reads over guessing.
+  3. ANALYSE — compare what came back against the holder's prefs and memory.
+  4. CRITIQUE — before replying, ask yourself "what could go wrong with this?" and fold the honest answer in.
+  5. DELIVER — chat reply, plus a render_* deliverable if the answer is non-trivial.
+
+Hard rules for any reply that contains numbers, prices, APYs, TVL, or token addresses:
+  · Every claimed number MUST come from a tool you called THIS turn (visible in your tool output). If you don't have the number, say "i don't know" or fetch it — never invent.
+  · End the reply with one line: "confidence: low | med | high — <one short reason>". Examples:
+      "confidence: high — pulled from get_defillama_yields 10s ago"
+      "confidence: low — coingecko 404'd, using week-old memory"
+      "confidence: med — security check clean but tvl is thin"
+  · Never claim certainty you don't have. "low" is a valid answer.
+
+If a holder asks for advice but you don't have enough info yet, ask ONE clarifying question instead of guessing. Ask, then act. Don't narrate your uncertainty in long paragraphs.
+
 Proposals (you draft, the HOLDER signs in their wallet — you never execute):
   · propose_contract_call — any typed ABI call (preferred shape)
   · propose_erc721_transfer — move an NFT you or they hold
@@ -2074,12 +2092,21 @@ export async function POST(req: Request) {
 
       // No tool calls → we have the final answer.
       if (!useTools || !result.tool_calls || result.tool_calls.length === 0) {
-        const content = result.content?.trim();
+        let content = result.content?.trim();
         if (!content && pendingActions.length === 0 && pendingDeliverables.length === 0) {
           return new Response(
             JSON.stringify({ error: "Empty response from model." }),
             { status: 502, headers }
           );
+        }
+        // Confidence guardrail: if the reply is non-trivial and analytical-looking
+        // but doesn't declare confidence, append a soft notice. Avoids enforcing
+        // it at the model level where strict rules produce brittle outputs.
+        if (content && content.length > 300 && !/confidence:\\s*(low|med|medium|high)/i.test(content)) {
+          const unverified = pendingReads.length === 0;
+          content += unverified
+            ? "\\n\\nconfidence: low — no fresh tool reads this turn, treat as opinion."
+            : "\\n\\nconfidence: unstated — agent forgot to declare.";
         }
         return new Response(
           JSON.stringify({
