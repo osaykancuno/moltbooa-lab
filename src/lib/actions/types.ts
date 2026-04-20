@@ -111,11 +111,54 @@ export interface AgentRead {
   error?: string;
 }
 
+/**
+ * Structured artefacts the agent produces as a consultant — rendered as
+ * downloadable cards in the Terminal rather than plain chat prose. These
+ * are "safe" outputs (no signing, no state change) but still owner-visible
+ * only because the endpoint template surfaces them alongside actions.
+ */
+export type AgentDeliverable =
+  | {
+      kind: "report";
+      id: string;
+      title: string;
+      /** Markdown body. Rendered with a minimal whitelist (headings, lists, code, links). */
+      markdown: string;
+    }
+  | {
+      kind: "comparison";
+      id: string;
+      title: string;
+      /** Column headers in display order. */
+      columns: string[];
+      /** Each row is parallel to `columns`. Values stringified on render. */
+      rows: Array<Record<string, string | number | boolean | null>>;
+      /** Optional 1-2 sentence summary / recommendation. */
+      summary?: string;
+    }
+  | {
+      kind: "plan";
+      id: string;
+      title: string;
+      steps: Array<{
+        /** 1-indexed step number as displayed. */
+        n: number;
+        /** Imperative short description of the step. */
+        title: string;
+        /** Optional longer detail in Markdown. */
+        detail?: string;
+        /** Optional id of a proposed action this step corresponds to. */
+        actionId?: string;
+      }>;
+      summary?: string;
+    };
+
 /** Extended /chat response. Backward-compatible: `content` still required. */
 export interface TerminalChatResponse {
   content: string;
   actions?: AgentAction[];
   reads?: AgentRead[];
+  deliverables?: AgentDeliverable[];
 }
 
 /** Build the feedback message appended to the next request so the LLM knows what happened. */

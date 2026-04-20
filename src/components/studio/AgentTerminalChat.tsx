@@ -27,6 +27,7 @@ import type {
   ActionResult,
   ActionStatus,
   AgentRead,
+  AgentDeliverable,
 } from "@/lib/actions/types";
 import { formatActionFeedback } from "@/lib/actions/types";
 import { useExecuteAction } from "@/lib/actions/execute";
@@ -37,6 +38,7 @@ import {
   loadLog,
 } from "@/lib/terminal-log";
 import ActionQueue, { type QueueItem } from "./ActionQueue";
+import DeliverableCard from "./DeliverableCard";
 import TxToast from "./TxToast";
 
 interface Props {
@@ -65,6 +67,7 @@ export default function AgentTerminalChat({
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reads, setReads] = useState<AgentRead[]>([]);
+  const [deliverables, setDeliverables] = useState<AgentDeliverable[]>([]);
   const [toast, setToast] = useState<
     { result: ActionResult; chainId?: number } | null
   >(null);
@@ -131,6 +134,13 @@ export default function AgentTerminalChat({
       ]);
       if (reply.reads?.length) {
         setReads((prev) => [...prev, ...reply.reads!]);
+      }
+      if (reply.deliverables?.length) {
+        setDeliverables((prev) => {
+          const existingIds = new Set(prev.map((d) => d.id));
+          const fresh = reply.deliverables!.filter((d) => !existingIds.has(d.id));
+          return [...prev, ...fresh];
+        });
       }
       if (reply.actions?.length) {
         setQueue((prev) => {
@@ -337,15 +347,37 @@ export default function AgentTerminalChat({
           </p>
         </div>
 
-        {/* ── QUEUE pane ── */}
-        <ActionQueue
-          items={queue}
-          walletAddress={address}
-          onApprove={onApprove}
-          onReject={onReject}
-          onExportLog={onExportLog}
-          onClearLog={onClearLog}
-        />
+        {/* ── QUEUE + DELIVERABLES pane ── */}
+        <div className="space-y-4">
+          <ActionQueue
+            items={queue}
+            walletAddress={address}
+            onApprove={onApprove}
+            onReject={onReject}
+            onExportLog={onExportLog}
+            onClearLog={onClearLog}
+          />
+          {deliverables.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="font-[family-name:var(--font-pixel)] text-[10px] text-accent-cyan tracking-wider">
+                  DELIVERABLES ({deliverables.length})
+                </h3>
+                <button
+                  onClick={() => setDeliverables([])}
+                  className="text-[9px] text-foreground/40 hover:text-foreground/80 font-[family-name:var(--font-pixel)]"
+                >
+                  CLEAR
+                </button>
+              </div>
+              <div className="space-y-2">
+                {deliverables.map((d) => (
+                  <DeliverableCard key={d.id} deliverable={d} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <TxToast

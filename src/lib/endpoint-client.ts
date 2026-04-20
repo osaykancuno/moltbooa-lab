@@ -1,5 +1,5 @@
 import { validateEndpointUrl } from "@/lib/endpoint-validator";
-import type { AgentAction, AgentRead } from "@/lib/actions/types";
+import type { AgentAction, AgentRead, AgentDeliverable } from "@/lib/actions/types";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -23,6 +23,7 @@ export interface ChatResponseBody {
   content: string;
   actions?: AgentAction[];
   reads?: AgentRead[];
+  deliverables?: AgentDeliverable[];
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -135,6 +136,7 @@ export async function postToAgentEndpoint(
       content: json.content,
       actions: Array.isArray(json.actions) ? json.actions : undefined,
       reads: Array.isArray(json.reads) ? json.reads : undefined,
+      deliverables: Array.isArray(json.deliverables) ? json.deliverables : undefined,
     };
   } finally {
     clearTimeout(timer);

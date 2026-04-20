@@ -584,6 +584,11 @@ export interface ReadBreadcrumb {
   };
 }
 
+/** Structured output emitted by render_* tools (report/comparison/plan). */
+export interface DeliverableEnvelope {
+  __deliverable: Record<string, unknown>;
+}
+
 /** Context passed to runTool from the chat route. */
 export interface ToolContext {
   /** The BOOA tokenId this endpoint represents. Used to resolve own agentId. */
@@ -991,6 +996,78 @@ export const TOOL_SCHEMAS = [
           contract: { type: "string", description: "NFT contract address." },
         },
         required: ["contract"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "render_report",
+      description:
+        "Emit a structured consultant-style REPORT as a deliverable (not chat text). Use this when the holder asks for analysis, a writeup, a briefing, or a recommendation that needs more than 2-3 sentences. The UI renders it as a downloadable card. Keep markdown clean: headings, bullets, short paragraphs. Cite numbers that came from tool reads.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short report title shown on the card." },
+          markdown: { type: "string", description: "Markdown body. Max ~4000 chars. Allowed: # ## ### headings, -/* bullets, 1. numbered lists, **bold**, *italic*, inline code with backticks, [text](url)." },
+        },
+        required: ["title", "markdown"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "render_comparison",
+      description:
+        "Emit a COMPARISON TABLE as a deliverable. Use this to compare yield pools, tokens, protocols, NFT collections, etc. Columns = attribute names, rows = items. Add a 1-2 sentence summary with your recommendation.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          columns: {
+            type: "array",
+            description: "Column headers in display order, e.g. ['protocol','chain','apy','tvl','risk'].",
+            items: { type: "string" },
+          },
+          rows: {
+            type: "array",
+            description: "Array of row objects. Each row has keys matching columns. Values can be strings, numbers, or booleans.",
+            items: { type: "object" },
+          },
+          summary: { type: "string", description: "Optional 1-2 sentence takeaway / recommendation." },
+        },
+        required: ["title", "columns", "rows"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "render_plan",
+      description:
+        "Emit a multi-step PLAN as a deliverable. Use this when a task needs sequenced steps (e.g. 'bridge, then approve, then swap'). Each step has a short imperative title and optional detail. Link steps to proposed actions via actionId when applicable.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          steps: {
+            type: "array",
+            description: "Ordered steps. Each { n, title, detail?, actionId? }. n is 1-indexed.",
+            items: {
+              type: "object",
+              properties: {
+                n: { type: "number" },
+                title: { type: "string" },
+                detail: { type: "string" },
+                actionId: { type: "string", description: "Id of a propose_* tool call this step corresponds to, if any." },
+              },
+              required: ["n", "title"],
+            },
+          },
+          summary: { type: "string" },
+        },
+        required: ["title", "steps"],
       },
     },
   },
@@ -1609,6 +1686,72 @@ export async function runTool(
         return Object.assign({ error: msg }, read);
       }
     }
+    case "render_report": {
+      const title = typeof args.title === "string" ? args.title.slice(0, 200) : "";
+      const md = typeof args.markdown === "string" ? args.markdown.slice(0, 6000) : "";
+      if (!title || !md) return { error: "title and markdown required" };
+      const envelope: DeliverableEnvelope = {
+        __deliverable: { kind: "report", id: randomId(), title, markdown: md },
+      };
+      return envelope;
+    }
+    case "render_comparison": {
+      const title = typeof args.title === "string" ? args.title.slice(0, 200) : "";
+      const columns = Array.isArray(args.columns)
+        ? args.columns.filter((c): c is string => typeof c === "string").slice(0, 12)
+        : [];
+      const rows = Array.isArray(args.rows)
+        ? args.rows.filter((r): r is Record<string, unknown> => !!r && typeof r === "object").slice(0, 50)
+        : [];
+      const summary = typeof args.summary === "string" ? args.summary.slice(0, 600) : undefined;
+      if (!title || columns.length === 0 || rows.length === 0)
+        return { error: "title, columns, rows required" };
+      // Normalize each row: only keep primitives keyed by known columns.
+      const normalized = rows.map((r) => {
+        const out: Record<string, string | number | boolean | null> = {};
+        for (const c of columns) {
+          const v = r[c];
+          if (v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+            out[c] = v;
+          } else if (v === undefined) {
+            out[c] = null;
+          } else {
+            out[c] = String(v).slice(0, 120);
+          }
+        }
+        return out;
+      });
+      const envelope: DeliverableEnvelope = {
+        __deliverable: {
+          kind: "comparison",
+          id: randomId(),
+          title,
+          columns,
+          rows: normalized,
+          summary,
+        },
+      };
+      return envelope;
+    }
+    case "render_plan": {
+      const title = typeof args.title === "string" ? args.title.slice(0, 200) : "";
+      const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+      if (!title || rawSteps.length === 0) return { error: "title and steps required" };
+      const steps = rawSteps
+        .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+        .slice(0, 20)
+        .map((s, i) => ({
+          n: typeof s.n === "number" ? s.n : i + 1,
+          title: typeof s.title === "string" ? s.title.slice(0, 200) : \`Step \${i + 1}\`,
+          detail: typeof s.detail === "string" ? s.detail.slice(0, 600) : undefined,
+          actionId: typeof s.actionId === "string" ? s.actionId.slice(0, 64) : undefined,
+        }));
+      const summary = typeof args.summary === "string" ? args.summary.slice(0, 600) : undefined;
+      const envelope: DeliverableEnvelope = {
+        __deliverable: { kind: "plan", id: randomId(), title, steps, summary },
+      };
+      return envelope;
+    }
     default:
       return { error: \`unknown tool: \${name}\` };
   }
@@ -1624,12 +1767,17 @@ export function hasReadBreadcrumb(v: unknown): v is ReadBreadcrumb {
   return !!v && typeof v === "object" && "__read" in (v as object);
 }
 
-/** Strip the breadcrumb before sending to the LLM — it's metadata for the UI. */
+/** Type-guard for structured deliverables (report/comparison/plan). */
+export function isDeliverable(v: unknown): v is DeliverableEnvelope {
+  return !!v && typeof v === "object" && "__deliverable" in (v as object);
+}
+
+/** Strip internal markers before sending tool result back to the LLM. */
 export function stripInternalKeys(v: unknown): unknown {
   if (!v || typeof v !== "object") return v;
   const rest: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-    if (k === "__read" || k === "__action") continue;
+    if (k === "__read" || k === "__action" || k === "__deliverable") continue;
     rest[k] = val;
   }
   return rest;
@@ -1654,6 +1802,7 @@ import {
   runTool,
   isActionProposal,
   hasReadBreadcrumb,
+  isDeliverable,
   stripInternalKeys,
 } from "@/lib/tools";
 
@@ -1711,6 +1860,12 @@ Proposals (you draft, the HOLDER signs in their wallet — you never execute):
   · propose_set_agent_uri — point your identity NFT at a new card URI
   · propose_sign_message — personal_sign for auth/X402/attestation
   · propose_raw_tx — raw calldata fallback (avoid when ABI is known)
+
+Deliverables (structured outputs — NOT chat text, rendered as downloadable cards):
+  · render_report(title, markdown) — multi-section writeups, briefings, analyses
+  · render_comparison(title, columns, rows, summary) — side-by-side tables
+  · render_plan(title, steps[], summary) — sequenced multi-step plans
+When you'd otherwise dump a wall of text (>200 words), use render_report instead. When comparing 2+ options, use render_comparison. When sequencing actions, use render_plan. After emitting a deliverable, write a 1-line handoff in chat — never repeat its content.
 
 Rules when proposing:
   · ONE action per tool call. Describe WHY in \`rationale\` — the holder reads it.
@@ -1890,6 +2045,8 @@ export async function POST(req: Request) {
     const pendingActions: unknown[] = [];
     // Off-chain read breadcrumbs surfaced to the UI as \`reads\`.
     const pendingReads: unknown[] = [];
+    // Structured consultant outputs surfaced to the UI as \`deliverables\`.
+    const pendingDeliverables: unknown[] = [];
     // Per-round tool-call cap to block runaway loops (e.g. fetch_url spam).
     const MAX_READS_PER_TURN = 10;
     let readsThisTurn = 0;
@@ -1909,7 +2066,7 @@ export async function POST(req: Request) {
       // No tool calls → we have the final answer.
       if (!useTools || !result.tool_calls || result.tool_calls.length === 0) {
         const content = result.content?.trim();
-        if (!content && pendingActions.length === 0) {
+        if (!content && pendingActions.length === 0 && pendingDeliverables.length === 0) {
           return new Response(
             JSON.stringify({ error: "Empty response from model." }),
             { status: 502, headers }
@@ -1917,9 +2074,10 @@ export async function POST(req: Request) {
         }
         return new Response(
           JSON.stringify({
-            content: content ?? "(proposing actions — see cards)",
+            content: content ?? "(output ready — see deliverables / actions)",
             actions: pendingActions.length ? pendingActions : undefined,
             reads: pendingReads.length ? pendingReads : undefined,
+            deliverables: pendingDeliverables.length ? pendingDeliverables : undefined,
           }),
           { status: 200, headers }
         );
@@ -1978,6 +2136,18 @@ export async function POST(req: Request) {
               note: "Proposal queued for user approval. Do not propose the same action again. Wrap up your reply.",
             }),
           });
+        } else if (isDeliverable(out)) {
+          pendingDeliverables.push(out.__deliverable);
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({
+              ok: true,
+              rendered: true,
+              kind: (out.__deliverable as { kind?: string }).kind,
+              note: "Deliverable rendered in the UI. Do not repeat its contents in chat — just give a short handoff line.",
+            }),
+          });
         } else {
           messages.push({
             role: "tool",
@@ -1989,12 +2159,13 @@ export async function POST(req: Request) {
     }
 
     // Loop budget exceeded but we still have something useful to return.
-    if (pendingActions.length > 0 || pendingReads.length > 0) {
+    if (pendingActions.length > 0 || pendingReads.length > 0 || pendingDeliverables.length > 0) {
       return new Response(
         JSON.stringify({
-          content: "(proposing actions — see cards)",
+          content: "(output ready — see deliverables / actions)",
           actions: pendingActions.length ? pendingActions : undefined,
           reads: pendingReads.length ? pendingReads : undefined,
+          deliverables: pendingDeliverables.length ? pendingDeliverables : undefined,
         }),
         { status: 200, headers }
       );
