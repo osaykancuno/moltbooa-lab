@@ -21,7 +21,6 @@ import {
   polygon,
   shape,
   zksync,
-  type Chain,
 } from "viem/chains";
 
 /** Canonical list. Order here is the order shown in UI dropdowns. */

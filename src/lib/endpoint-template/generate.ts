@@ -172,7 +172,10 @@ LLM_MODEL=
 # ─── Tool calling (optional, required for the Terminal) ───
 # When "true", the agent can:
 #   · call Khôra read APIs (get_booa, get_agent_card, get_gallery_top)
-#   · fetch public https URLs (fetch_url) and query CoinGecko (get_token_price)
+#   · fetch public https URLs (fetch_url), query CoinGecko spot/history,
+#     inspect native balances and gas via public RPC
+#   · run consultant reads: get_defillama_protocol, get_defillama_yields,
+#     get_token_security (GoPlus), get_nft_floor (Reservoir)
 #   · propose on-chain actions for the HOLDER to sign in the Terminal
 #     (propose_contract_call, propose_erc721_transfer,
 #      propose_set_agent_metadata, propose_set_agent_uri,
@@ -470,6 +473,61 @@ function resolveChainId(raw: unknown, fallback: number = SHAPE): number | null {
   if (!Number.isFinite(n)) return null;
   if (!SUPPORTED_CHAIN_IDS.has(n)) return null;
   return n;
+}
+
+/**
+ * Public RPC endpoints used by read tools (get_native_balance, get_gas_price).
+ * These are free, best-effort URLs. Rate limits apply — for heavy usage the
+ * holder can fork the endpoint and drop in their own Alchemy/Infura URL.
+ */
+const CHAIN_RPC: Record<number, string> = {
+  360: "https://mainnet.shape.network",
+  1: "https://eth.llamarpc.com",
+  42161: "https://arbitrum.llamarpc.com",
+  10: "https://optimism.llamarpc.com",
+  8453: "https://base.llamarpc.com",
+  137: "https://polygon.llamarpc.com",
+  56: "https://bsc.llamarpc.com",
+  59144: "https://rpc.linea.build",
+  324: "https://mainnet.era.zksync.io",
+};
+
+const CHAIN_NATIVE: Record<number, string> = {
+  360: "ETH", 1: "ETH", 42161: "ETH", 10: "ETH", 8453: "ETH",
+  137: "POL", 56: "BNB", 59144: "ETH", 324: "ETH",
+};
+
+async function jsonRpc(chainId: number, method: string, params: unknown[]): Promise<unknown> {
+  const url = CHAIN_RPC[chainId];
+  if (!url) throw new Error(\`no RPC for chain \${chainId}\`);
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 6000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
+    const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
+    if (data.error) throw new Error(data.error.message || "rpc error");
+    return data.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function weiHexToEth(hex: string): string {
+  try {
+    const wei = BigInt(hex);
+    const whole = wei / BigInt("1000000000000000000");
+    const frac = wei % BigInt("1000000000000000000");
+    const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+    return fracStr ? \`\${whole}.\${fracStr}\` : whole.toString();
+  } catch {
+    return "0";
+  }
 }
 
 // ── SSRF guard for fetch_url ──
@@ -825,6 +883,114 @@ export const TOOL_SCHEMAS = [
           query: { type: "string", description: "Search query. Keep under 200 chars." },
         },
         required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_native_balance",
+      description:
+        "Read the native coin balance (ETH/POL/BNB/etc.) of an address on a given chain via public RPC. Free, no key. Use this when the holder asks 'what do I have' or before suggesting swaps.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "0x... address." },
+          chainId: { type: "number", description: "Chain id. Defaults to 360 (Shape). Supported: 360,1,42161,10,8453,137,56,59144,324." },
+        },
+        required: ["address"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_gas_price",
+      description:
+        "Current gas price in gwei on a given chain via public RPC. Use this to gas-aware your proposals — avoid suggesting sub-$50 trades on expensive chains.",
+      parameters: {
+        type: "object",
+        properties: {
+          chainId: { type: "number", description: "Chain id. Defaults to 360 (Shape)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_defillama_protocol",
+      description:
+        "Fetch DeFiLlama data for a DeFi protocol (TVL, chain breakdown, 1d/7d change). Free, no key. Pass the llama slug (e.g. 'uniswap', 'aave-v3', 'curve-dex').",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "DeFiLlama protocol slug (lowercase, dashes)." },
+        },
+        required: ["slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_defillama_yields",
+      description:
+        "Top yield pools from DeFiLlama. Free. Returns up to 10 pools sorted by APY. Optionally filter by project slug (e.g. 'aave-v3', 'compound-v3') or chain name (e.g. 'Arbitrum', 'Base').",
+      parameters: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "Optional project slug filter." },
+          chain: { type: "string", description: "Optional chain name filter (case-insensitive)." },
+          minTvl: { type: "number", description: "Minimum TVL in USD. Defaults to 1_000_000 to filter noise." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_token_security",
+      description:
+        "GoPlus token security check: is this an honeypot? anti-whale? taxes? mintable? owner-privileged? Free, no key. Essential before recommending ANY token swap.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "Token contract address." },
+          chainId: { type: "number", description: "Chain id. Supported by GoPlus: 1 (ETH), 56 (BSC), 137 (Polygon), 42161 (Arbitrum), 10 (Optimism), 8453 (Base), 59144 (Linea), 324 (zkSync)." },
+        },
+        required: ["address", "chainId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_historical_price",
+      description:
+        "CoinGecko historical USD price series for a coin. Returns daily closes for the last N days (max 365). Free, no key. Use for trend analysis before recommending a buy/sell.",
+      parameters: {
+        type: "object",
+        properties: {
+          coinId: { type: "string", description: "CoinGecko coin id (e.g. 'ethereum')." },
+          days: { type: "number", description: "Number of days back (1-365). Defaults to 30." },
+        },
+        required: ["coinId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_nft_floor",
+      description:
+        "Floor price and 1d sales stats for an NFT collection via Reservoir (Ethereum mainnet default). Free tier public. Pass contract address.",
+      parameters: {
+        type: "object",
+        properties: {
+          contract: { type: "string", description: "NFT contract address." },
+        },
+        required: ["contract"],
       },
     },
   },
@@ -1185,6 +1351,264 @@ export async function runTool(
         return Object.assign({ error: msg }, read);
       }
     }
+    case "get_native_balance": {
+      const addr = typeof args.address === "string" ? args.address : "";
+      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+        const read: ReadBreadcrumb = { __read: { tool: "get_native_balance", query: addr, ok: false, error: "bad address" } };
+        return Object.assign({ error: "bad address" }, read);
+      }
+      const cid = resolveChainId(args.chainId) ?? SHAPE;
+      try {
+        const hex = (await jsonRpc(cid, "eth_getBalance", [addr, "latest"])) as string;
+        const eth = weiHexToEth(hex);
+        const symbol = CHAIN_NATIVE[cid] || "ETH";
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_native_balance", query: \`\${addr}@\${cid}\`, ok: true, preview: \`\${eth} \${symbol}\` },
+        };
+        return Object.assign({ address: addr, chainId: cid, balanceWei: hex, balance: eth, symbol }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "rpc failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_native_balance", query: \`\${addr}@\${cid}\`, ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_gas_price": {
+      const cid = resolveChainId(args.chainId) ?? SHAPE;
+      try {
+        const hex = (await jsonRpc(cid, "eth_gasPrice", [])) as string;
+        const wei = BigInt(hex);
+        const gwei = Number(wei / BigInt(1000000000));
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_gas_price", query: String(cid), ok: true, preview: \`\${gwei} gwei\` },
+        };
+        return Object.assign({ chainId: cid, wei: hex, gwei }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "rpc failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_gas_price", query: String(cid), ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_defillama_protocol": {
+      const slug = typeof args.slug === "string" ? args.slug.toLowerCase() : "";
+      if (!/^[a-z0-9-]{1,80}$/.test(slug)) {
+        const read: ReadBreadcrumb = { __read: { tool: "get_defillama_protocol", query: slug, ok: false, error: "bad slug" } };
+        return Object.assign({ error: "bad slug" }, read);
+      }
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 8000);
+        const res = await fetch(\`https://api.llama.fi/protocol/\${encodeURIComponent(slug)}\`, { signal: ac.signal });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_defillama_protocol", query: slug, ok: false, error: \`HTTP \${res.status}\` } };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as Record<string, unknown>;
+        // Prune the response — DeFiLlama returns huge history arrays we don't want in the LLM context.
+        const summary = {
+          name: data.name,
+          symbol: data.symbol,
+          category: data.category,
+          chains: data.chains,
+          tvl: data.currentChainTvls,
+          change_1d: data.change_1d,
+          change_7d: data.change_7d,
+          mcap: data.mcap,
+          description: typeof data.description === "string" ? data.description.slice(0, 400) : undefined,
+        };
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_defillama_protocol", query: slug, ok: true, preview: \`\${summary.name} · TVL change_1d=\${summary.change_1d}\` },
+        };
+        return Object.assign(summary, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_defillama_protocol", query: slug, ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_defillama_yields": {
+      const project = typeof args.project === "string" ? args.project.toLowerCase() : null;
+      const chain = typeof args.chain === "string" ? args.chain.toLowerCase() : null;
+      const minTvl = typeof args.minTvl === "number" ? args.minTvl : 1000000;
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 10000);
+        const res = await fetch("https://yields.llama.fi/pools", { signal: ac.signal });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_defillama_yields", query: project || chain || "top", ok: false, error: \`HTTP \${res.status}\` } };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as { data?: Array<Record<string, unknown>> };
+        let pools = (data.data || []).filter((p) => typeof p.tvlUsd === "number" && (p.tvlUsd as number) >= minTvl);
+        if (project) pools = pools.filter((p) => String(p.project).toLowerCase() === project);
+        if (chain) pools = pools.filter((p) => String(p.chain).toLowerCase() === chain);
+        pools.sort((a, b) => (b.apy as number || 0) - (a.apy as number || 0));
+        const top = pools.slice(0, 10).map((p) => ({
+          project: p.project,
+          chain: p.chain,
+          symbol: p.symbol,
+          apy: p.apy,
+          tvlUsd: p.tvlUsd,
+          ilRisk: p.ilRisk,
+          stablecoin: p.stablecoin,
+          pool: p.pool,
+        }));
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_defillama_yields", query: \`\${project || ""}:\${chain || ""}\`, ok: true, preview: \`\${top.length} pools · top APY \${top[0]?.apy ?? "?"}%\` },
+        };
+        return Object.assign({ count: top.length, pools: top }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_defillama_yields", query: project || chain || "top", ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_token_security": {
+      const addr = typeof args.address === "string" ? args.address.toLowerCase() : "";
+      const cid = resolveChainId(args.chainId);
+      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return { error: "bad address" };
+      if (cid === null) return { error: "unsupported chainId for GoPlus" };
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 10000);
+        const res = await fetch(
+          \`https://api.gopluslabs.io/api/v1/token_security/\${cid}?contract_addresses=\${addr}\`,
+          { signal: ac.signal }
+        );
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_token_security", query: \`\${addr}@\${cid}\`, ok: false, error: \`HTTP \${res.status}\` } };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as { result?: Record<string, Record<string, unknown>> };
+        const token = data.result?.[addr] || data.result?.[addr.toLowerCase()];
+        if (!token) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_token_security", query: \`\${addr}@\${cid}\`, ok: false, error: "not indexed" } };
+          return Object.assign({ error: "token not indexed by GoPlus yet" }, read);
+        }
+        // Cherry-pick the most actionable flags so we don't flood the LLM.
+        const flags = {
+          name: token.token_name,
+          symbol: token.token_symbol,
+          is_honeypot: token.is_honeypot,
+          honeypot_with_same_creator: token.honeypot_with_same_creator,
+          is_open_source: token.is_open_source,
+          is_proxy: token.is_proxy,
+          is_mintable: token.is_mintable,
+          can_take_back_ownership: token.can_take_back_ownership,
+          owner_change_balance: token.owner_change_balance,
+          hidden_owner: token.hidden_owner,
+          selfdestruct: token.selfdestruct,
+          external_call: token.external_call,
+          buy_tax: token.buy_tax,
+          sell_tax: token.sell_tax,
+          cannot_buy: token.cannot_buy,
+          cannot_sell_all: token.cannot_sell_all,
+          slippage_modifiable: token.slippage_modifiable,
+          is_blacklisted: token.is_blacklisted,
+          is_whitelisted: token.is_whitelisted,
+          is_anti_whale: token.is_anti_whale,
+          trading_cooldown: token.trading_cooldown,
+          transfer_pausable: token.transfer_pausable,
+          total_supply: token.total_supply,
+          holder_count: token.holder_count,
+        };
+        const suspicious = flags.is_honeypot === "1" || flags.selfdestruct === "1" || flags.hidden_owner === "1";
+        const read: ReadBreadcrumb = {
+          __read: {
+            tool: "get_token_security",
+            query: \`\${flags.symbol || addr}@\${cid}\`,
+            ok: true,
+            preview: suspicious ? \`⚠ SUSPICIOUS: \${flags.symbol}\` : \`\${flags.symbol} looks clean\`,
+          },
+        };
+        return Object.assign({ address: addr, chainId: cid, flags, suspicious }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_token_security", query: \`\${addr}@\${cid}\`, ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_historical_price": {
+      const id = typeof args.coinId === "string" ? args.coinId.toLowerCase() : "";
+      if (!/^[a-z0-9-]{1,50}$/.test(id)) return { error: "bad coinId" };
+      const days = typeof args.days === "number" && args.days > 0 ? Math.min(365, Math.floor(args.days)) : 30;
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 8000);
+        const res = await fetch(
+          \`https://api.coingecko.com/api/v3/coins/\${encodeURIComponent(id)}/market_chart?vs_currency=usd&days=\${days}&interval=daily\`,
+          { signal: ac.signal }
+        );
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_historical_price", query: \`\${id}:\${days}d\`, ok: false, error: \`HTTP \${res.status}\` } };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as { prices?: Array<[number, number]> };
+        const prices = (data.prices || []).map(([ts, price]) => ({ ts, price }));
+        if (prices.length === 0) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_historical_price", query: \`\${id}:\${days}d\`, ok: false, error: "empty" } };
+          return Object.assign({ error: "no data" }, read);
+        }
+        const first = prices[0].price;
+        const last = prices[prices.length - 1].price;
+        const change = ((last - first) / first) * 100;
+        const high = Math.max(...prices.map((p) => p.price));
+        const low = Math.min(...prices.map((p) => p.price));
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_historical_price", query: \`\${id}:\${days}d\`, ok: true, preview: \`\${change.toFixed(1)}% over \${days}d\` },
+        };
+        return Object.assign({ coinId: id, days, first, last, changePct: change, high, low, samples: prices.length }, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_historical_price", query: id, ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
+    case "get_nft_floor": {
+      const addr = typeof args.contract === "string" ? args.contract.toLowerCase() : "";
+      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return { error: "bad contract" };
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 8000);
+        const res = await fetch(
+          \`https://api.reservoir.tools/collections/v7?id=\${addr}&includeTopBid=false\`,
+          { signal: ac.signal, headers: { accept: "application/json" } }
+        );
+        clearTimeout(timer);
+        if (!res.ok) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_nft_floor", query: addr, ok: false, error: \`HTTP \${res.status}\` } };
+          return Object.assign({ error: \`HTTP \${res.status}\` }, read);
+        }
+        const data = (await res.json()) as { collections?: Array<Record<string, unknown>> };
+        const col = data.collections?.[0];
+        if (!col) {
+          const read: ReadBreadcrumb = { __read: { tool: "get_nft_floor", query: addr, ok: false, error: "not found" } };
+          return Object.assign({ error: "collection not found" }, read);
+        }
+        const floor = (col.floorAsk as { price?: { amount?: { native?: number; usd?: number } } } | undefined)?.price?.amount;
+        const summary = {
+          name: col.name,
+          symbol: col.symbol,
+          tokenCount: col.tokenCount,
+          ownerCount: col.ownerCount,
+          floorNative: floor?.native,
+          floorUsd: floor?.usd,
+          volume1d: (col.volume as Record<string, number> | undefined)?.["1day"],
+          volume7d: (col.volume as Record<string, number> | undefined)?.["7day"],
+        };
+        const read: ReadBreadcrumb = {
+          __read: { tool: "get_nft_floor", query: \`\${summary.name || addr}\`, ok: true, preview: \`floor \${summary.floorNative} ETH\` },
+        };
+        return Object.assign(summary, read);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "fetch failed";
+        const read: ReadBreadcrumb = { __read: { tool: "get_nft_floor", query: addr, ok: false, error: msg.slice(0, 200) } };
+        return Object.assign({ error: msg }, read);
+      }
+    }
     default:
       return { error: \`unknown tool: \${name}\` };
   }
@@ -1269,7 +1693,16 @@ Reads (you execute, result is yours):
   · get_booa / get_agent_card / get_gallery_top — Khôra / ERC-8004 state
   · fetch_url(https only) — pull any public page/API into the conversation
   · get_token_price(coinId) — CoinGecko spot price
+  · get_historical_price(coinId, days) — price series for trend analysis
+  · get_native_balance(address, chainId?) — ETH/POL/BNB holdings per chain
+  · get_gas_price(chainId?) — current gas in gwei (gas-aware proposals)
+  · get_defillama_protocol(slug) — TVL + 1d/7d change for any DeFi protocol
+  · get_defillama_yields(project?, chain?, minTvl?) — top yield pools
+  · get_token_security(address, chainId) — honeypot/tax/owner flags. RUN THIS before proposing any token swap.
+  · get_nft_floor(contract) — Reservoir floor + volume (ETH mainnet)
   · web_search(query) — only if the holder configured WEB_SEARCH_API_KEY
+
+Consultant habit: gather data FIRST (balance, gas, prices, security), analyse, THEN propose or recommend. Never recommend a token swap without running get_token_security on it.
 
 Proposals (you draft, the HOLDER signs in their wallet — you never execute):
   · propose_contract_call — any typed ABI call (preferred shape)
